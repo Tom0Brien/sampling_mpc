@@ -21,8 +21,8 @@ def impedance_control(
     data,
     body_name,
     p_des, eul_des,
-    cartesian_stiffness,
-    cartesian_damping,
+    Kp,
+    Kd,
     nullspace_stiffness,
     q_d_nullspace
 ):
@@ -45,10 +45,7 @@ def impedance_control(
     jacp = np.zeros((3, model.nv))
     jacr = np.zeros((3, model.nv))
     mujoco.mj_jacBody(model, data, jacp, jacr, body_id)
-    # jacp = jacp[:, :7]
-    # jacr = jacr[:, :7]
     J = jnp.concatenate([jacp, jacr], axis=0)
-    print("J:", J)
 
     # Compute positional/orientation errors
     e_pos = p_curr - p_des
@@ -59,7 +56,7 @@ def impedance_control(
     v = jnp.concatenate([jacp @ dq, jacr @ dq], axis=0)
 
     # Cartesian impedance
-    F_ee_des = -cartesian_stiffness @ e - cartesian_damping @ v
+    F_ee_des = -Kp @ e - Kd @ v
     tau_task = J.T @ F_ee_des
 
     # Nullspace control
@@ -82,13 +79,13 @@ if __name__ == "__main__":
     model = mujoco.MjModel.from_xml_path(xml_path)
     data = mujoco.MjData(model)
     dt = model.opt.timestep
-    steps = int(sim_time / float(dt))
+    steps = int(sim_time / float(dt)) 
 
     # Cartesian and nullspace gains
-    cartesian_stiffness = jnp.diag(
+    Kp = jnp.diag(
         jnp.array([2000, 2000, 2000, 500, 500, 500], dtype=float)
     )
-    cartesian_damping   = jnp.diag(
+    Kd = jnp.diag(
         jnp.array([100, 100, 100, 10, 10, 10], dtype=float)
     )
     nullspace_stiffness = 0.0
@@ -121,8 +118,8 @@ if __name__ == "__main__":
                 body_name="hand",
                 p_des=p_des,
                 eul_des=eul_des,
-                cartesian_stiffness=cartesian_stiffness,
-                cartesian_damping=cartesian_damping,
+                Kp=Kp,
+                Kd=Kd,
                 nullspace_stiffness=nullspace_stiffness,
                 q_d_nullspace=q_d_nullspace
             )
