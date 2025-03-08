@@ -13,14 +13,14 @@ import jax.numpy as jnp
 import mujoco
 import mujoco.viewer
 
-
 from util import *
 
 def impedance_control(
     model,
     data,
-    body_name,
-    p_des, eul_des,
+    site_id,
+    p_des, 
+    eul_des,
     Kp,
     Kd,
     nullspace_stiffness,
@@ -30,51 +30,44 @@ def impedance_control(
     Compute one step of the Cartesian pose impedance control torque.
     """
     mujoco.mj_forward(model, data)
-
-    # Joint states
     q = jnp.array(data.qpos)
     dq = jnp.array(data.qvel)
-
     # End-effector pose
-    body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, body_name)
-    p_curr = jnp.array(data.xpos[body_id])
-    rot_ee = jnp.array(data.xmat[body_id].reshape((3, 3)))
-    quat_curr = jnp.array(data.xquat[body_id])
+    p_curr = jnp.array(data.site_xpos[site_id])
+    rot_ee = jnp.array(data.site_xmat[site_id].reshape((3, 3)))
+    quat_curr = mat_to_quat(rot_ee)
 
-    # Body Jacobians
-    jacp = np.zeros((3, model.nv))
-    jacr = np.zeros((3, model.nv))
-    mujoco.mj_jacBody(model, data, jacp, jacr, body_id)
-    J = jnp.concatenate([jacp, jacr], axis=0)
+    # Jacobian
+    J = np.zeros((6, model.nv))
+    mujoco.mj_jacSite(model, data, J[:3, :], J[3:, :], site_id)
 
     # Compute positional/orientation errors
     e_pos = p_curr - p_des
-    e_ori = orientation_error(quat_curr, euler_to_quat(eul_des), rot_ee)
+    e_ori = orientation_error(quat_curr, eul_to_quat(eul_des), rot_ee)
     e = jnp.concatenate([e_pos, e_ori], axis=0)
 
     # End-effector velocity in task space
-    v = jnp.concatenate([jacp @ dq, jacr @ dq], axis=0)
+    v = J @ dq
 
-    # Cartesian impedance
+    # Cartesian impedance (PD control)
     F_ee_des = -Kp @ e - Kd @ v
     tau_task = J.T @ F_ee_des
 
     # Nullspace control
-    # Jt_pinv = pseudo_inverse(J.T)
-    # proj = jnp.eye(model.nv) - (J.T @ Jt_pinv)
-    # dn = 2.0 * jnp.sqrt(nullspace_stiffness)
-    # tau_null = proj @ (nullspace_stiffness * (q_d_nullspace - q) - dn * dq)
+    Jt_pinv = pseudo_inverse(J.T)
+    proj = jnp.eye(model.nv) - (J.T @ Jt_pinv)
+    dn = 2.0 * jnp.sqrt(nullspace_stiffness)
+    tau_null = proj @ (nullspace_stiffness * (q_d_nullspace - q) - dn * dq)
 
-    # Coriolis + Gravity Compensation
+    # Coriolis Compensation (no gravity compensation in Franka example)
     mujoco.mj_inverse(model, data)
-    cor_grav = jnp.array(data.qfrc_bias[:model.nv])
-
-    return tau_task + cor_grav  #+ tau_null
+    tau_cor = jnp.array(data.qfrc_bias) - jnp.array(data.qfrc_gravcomp)
+    return tau_task + tau_cor + tau_null
 
 if __name__ == "__main__":
     xml_path= "models/mujoco_menagerie/franka_emika_panda/mjx_scene.xml"
-    sim_time=10.0
-    render_fps=60.0
+    sim_time=20.0
+    render_fps=120.0
     fixed_camera_id=None
     model = mujoco.MjModel.from_xml_path(xml_path)
     data = mujoco.MjData(model)
@@ -83,16 +76,23 @@ if __name__ == "__main__":
 
     # Cartesian and nullspace gains
     Kp = jnp.diag(
-        jnp.array([2000, 2000, 2000, 500, 500, 500], dtype=float)
+        jnp.array([300, 300, 300, 50, 50, 50], dtype=float)
     )
-    Kd = jnp.diag(
-        jnp.array([100, 100, 100, 10, 10, 10], dtype=float)
-    )
-    nullspace_stiffness = 0.0
+    # 2 * square root of Kp
+    Kd = 2.0 * jnp.sqrt(Kp)
+    nullspace_stiffness = 0.01
 
+    body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "link7")
+    print("body_id: ", body_id)
+    # Get the site ID once
+    gripper_site_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, "gripper")
+    
     # Desired pose in position + Euler angles
-    p_des = jnp.array([0.7, 0.0, 0.3])
-    eul_des = jnp.array([0.0, 3.14, 0.0])  # (roll, pitch, yaw) in radians
+    p_des = jnp.array([0.5, 0.0, 0.3])
+    eul_des = jnp.array([-3.14, 0.0, 0.0])
+
+    # Set the initial joint positions
+    data.qpos[:7] = jnp.array([0, -M_PI_4, 0, -3 * M_PI_4, 0, M_PI_2, M_PI_4])
 
     with mujoco.viewer.launch_passive(model, data) as viewer:
         if fixed_camera_id is not None:
@@ -103,7 +103,7 @@ if __name__ == "__main__":
         mujoco.mj_forward(model, data)
 
         # Desired nullspace posture from initial position
-        q_d_nullspace = jnp.array(data.qpos[:7])
+        q_d_nullspace = jnp.array(data.qpos)
 
         render_period = 1.0 / render_fps
         sim_start = time.time()
@@ -115,7 +115,7 @@ if __name__ == "__main__":
             tau_d = impedance_control(
                 model=model,
                 data=data,
-                body_name="hand",
+                site_id=gripper_site_id,
                 p_des=p_des,
                 eul_des=eul_des,
                 Kp=Kp,
@@ -129,7 +129,7 @@ if __name__ == "__main__":
             mujoco.mj_step(model, data)
 
             # Update the desired frame visualization
-            update_desired_pose_frame(viewer, frame_id, p_des, euler_to_quat(eul_des))
+            update_desired_pose_frame(viewer, frame_id, p_des, eul_to_quat(eul_des))
             viewer.sync()
             if not viewer.is_running():
                 break

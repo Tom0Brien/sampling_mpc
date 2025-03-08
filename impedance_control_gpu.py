@@ -28,7 +28,7 @@ def impedance_control_mjx(
     Kd: jnp.ndarray,
     nullspace_stiffness: float,
     q_d_nullspace: jnp.ndarray,
-    body_id: int = None
+    site_id: int = None
 ) -> jnp.ndarray:
     """
     Compute Cartesian pose impedance control torque using MJX.
@@ -36,44 +36,42 @@ def impedance_control_mjx(
     """
     # Run forward dynamics
     data_mjx = mjx.forward(model_mjx, data_mjx)
-    
-    # Joint states
-    q = data_mjx.qpos
+    q  = data_mjx.qpos
     dq = data_mjx.qvel
-
+    
     # End-effector pose
-    p_curr = data_mjx.xpos[body_id]
-    rot_ee = data_mjx.xmat[body_id].reshape((3, 3))
-    quat_curr = data_mjx.xquat[body_id]
+    p_curr = data_mjx.site_xpos[site_id]
+    rot_ee = data_mjx.site_xmat[site_id].reshape((3, 3))
+    quat_curr = mat_to_quat(rot_ee)
 
-    # Get jacobians of body frame (NV, 3)
-    jacp, jacr = jac(model_mjx, data_mjx, p_curr, body_id)
+    # Get jacobians for the site
+    jacp, jacr = jac(model_mjx, data_mjx, p_curr, 8)
     jacp = jacp.T
     jacr = jacr.T
     J = jnp.concatenate([jacp, jacr], axis=0)
 
     # Compute positional/orientation errors
     e_pos = p_curr - p_des
-    e_ori = orientation_error(quat_curr, euler_to_quat(eul_des), rot_ee)
+    e_ori = orientation_error(quat_curr, eul_to_quat(eul_des), rot_ee)
     e = jnp.concatenate([e_pos, e_ori], axis=0)
 
     # End-effector velocity in task space
-    v = jnp.concatenate([jacp @ dq, jacr @ dq], axis=0)
+    v = J @ dq
 
     # Cartesian impedance
     F_ee_des = -Kp @ e - Kd @ v
     tau_task = J.T @ F_ee_des
 
     # Nullspace control
-    # Jt_pinv = pseudo_inverse(J.T)
-    # proj = jnp.eye(7) - (J.T @ Jt_pinv)
-    # dn = 2.0 * jnp.sqrt(nullspace_stiffness)
-    # tau_null = proj @ (nullspace_stiffness * (q_d_nullspace - q) - dn * dq)
+    Jt_pinv = pseudo_inverse(J.T)
+    proj = jnp.eye(model_mjx.nv) - (J.T @ Jt_pinv)
+    dn = 2.0 * jnp.sqrt(nullspace_stiffness)
+    tau_null = proj @ (nullspace_stiffness * (q_d_nullspace - q) - dn * dq)
 
-    # Coriolis + Gravity Compensation
-    cor_grav = data_mjx.qfrc_bias
+    # Coriolis Compensation (no gravity compensation in Franka example)
+    tau_cor = data_mjx.qfrc_bias - data_mjx.qfrc_gravcomp
 
-    return tau_task  + cor_grav #+ tau_null
+    return tau_task + tau_cor + tau_null
 
 
 def run_parallel_simulations(
@@ -95,7 +93,7 @@ def run_parallel_simulations(
         N: Number of steps per simulation
         noise_scale: Scale of Gaussian noise for goal perturbation
         p_des: Base desired position
-    eul_des: Base desired orientation (Euler angles)
+        eul_des: Base desired orientation (Euler angles)
         dt: Timestep (if None, use model.opt.timestep)
         seed: Random seed
         
@@ -107,16 +105,18 @@ def run_parallel_simulations(
     if dt is None:
         dt = model.opt.timestep
     
-    # Get body ID before MJX conversion
-    body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "hand")
+    # Get site ID before MJX conversion
+    site_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, "gripper")
     
     # Setup MJX model and initial data
     model_mjx = mjx.put_model(model)
     data = mujoco.MjData(model)
+    # Set the initial joint positions
+    data.qpos[:7] = jnp.array([0, -M_PI_4, 0, -3 * M_PI_4, 0, M_PI_2, M_PI_4])
     mujoco.mj_forward(model, data)
     
     # Get initial joint positions for nullspace control
-    q_d_nullspace = jnp.array(data.qpos[:7])
+    q_d_nullspace = jnp.array(data.qpos)
     
     # Generate perturbed goal poses
     key = jax.random.PRNGKey(seed)
@@ -136,12 +136,11 @@ def run_parallel_simulations(
     
     # Cartesian and nullspace gains
     Kp = jnp.diag(
-        jnp.array([2000, 2000, 2000, 500, 500, 500], dtype=float)
+        jnp.array([300, 300, 300, 50, 50, 50], dtype=float)
     )
-    Kd = jnp.diag(
-        jnp.array([100, 100, 100, 10, 10, 10], dtype=float)
-    )
-    nullspace_stiffness = 0.0
+    # 2 * square root of Kp
+    Kd = 2.0 * jnp.sqrt(Kp)
+    nullspace_stiffness = 0.01
     
     # Define control function for a single simulation
     def control_step(data, p_des, eul_des):
@@ -154,7 +153,7 @@ def run_parallel_simulations(
             Kd=Kd,
             nullspace_stiffness=nullspace_stiffness,
             q_d_nullspace=q_d_nullspace,
-            body_id=body_id
+            site_id=site_id
         )
         # Apply control and step
         data = data.replace(ctrl=data.ctrl.at[:model_mjx.nv].set(tau_d))
@@ -258,7 +257,7 @@ def visualize_rollouts(
             for k in range(K):
                 data_k = rollouts[k][step]
                 mujoco.mjv_addGeoms(model, data_k, vopt, pert, catmask, viewer.user_scn)
-                update_desired_pose_frame(viewer, frame_ids[k], p_des_array[k], euler_to_quat(eul_des_array[k]))
+                update_desired_pose_frame(viewer, frame_ids[k], p_des_array[k], eul_to_quat(eul_des_array[k]))
             viewer.sync()
             
             if not viewer.is_running():
@@ -278,13 +277,13 @@ if __name__ == "__main__":
     
     # Set up simulation parameters
     K = 5          # Number of parallel simulations
-    N = 200         # Number of steps per simulation
+    N = 250         # Number of steps per simulation
     noise_scale = 0.1  # Scale of Gaussian noise for goal perturbation
     render_fps = 60.0
     
-    # Mean desired pose
-    p_des = np.array([0.7, 0.0, 0.3])
-    eul_des = np.array([0.0, 3.14, 0.0])  # (roll, pitch, yaw) in radians
+    # Desired pose in position + Euler angles
+    p_des = jnp.array([0.5, 0.0, 0.3])
+    eul_des = jnp.array([-3.14, 0.0, 0.0])
     
     # Run parallel simulations
     rollouts, p_des_array, eul_des_array = run_parallel_simulations(
