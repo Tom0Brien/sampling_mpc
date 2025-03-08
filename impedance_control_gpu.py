@@ -272,7 +272,7 @@ def visualize_rollouts(
         time.sleep(1.0)
 
 if __name__ == "__main__":
-    xml_path = "models/mujoco_menagerie/franka_emika_panda/mjx_scene.xml"
+    xml_path = "models/franka_emika_panda/mjx_scene.xml"
     model = mujoco.MjModel.from_xml_path(xml_path)
     
     # Set up simulation parameters

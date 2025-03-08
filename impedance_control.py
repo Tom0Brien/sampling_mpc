@@ -65,7 +65,7 @@ def impedance_control(
     return tau_task + tau_cor + tau_null
 
 if __name__ == "__main__":
-    xml_path= "models/mujoco_menagerie/franka_emika_panda/mjx_scene.xml"
+    xml_path= "models/franka_emika_panda/mjx_scene.xml"
     sim_time=20.0
     render_fps=120.0
     fixed_camera_id=None

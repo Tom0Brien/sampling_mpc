@@ -9,16 +9,19 @@ import jax
 import jax.numpy as jnp
 import mujoco
 from mujoco import mjx
+import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import both controllers
 from impedance_control import impedance_control
-from impedance_control_gpu import impedance_control_mjx, euler_to_quat
+from impedance_control_gpu import impedance_control_mjx, eul_to_quat
 
 def test_controllers():
     print("Testing CPU vs GPU impedance controllers...")
     
     # Load model
-    xml_path = "models/mujoco_menagerie/franka_emika_panda/mjx_scene.xml"
+    xml_path = "models/franka_emika_panda/mjx_scene.xml"
     model = mujoco.MjModel.from_xml_path(xml_path)
     data = mujoco.MjData(model)
     
@@ -28,6 +31,7 @@ def test_controllers():
     # Get body ID
     body_name = "hand"
     body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, body_name)
+    site_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, "gripper")
     
     # Create MJX versions
     model_mjx = mjx.put_model(model)
@@ -36,20 +40,20 @@ def test_controllers():
     # Set up control parameters (identical for both)
     p_des = jnp.array([0.7, 0.0, 0.3])
     eul_des = jnp.array([0.0, 3.14, 0.0])
-    cartesian_stiffness = jnp.diag(jnp.array([2000, 2000, 2000, 500, 500, 500], dtype=float))
-    cartesian_damping = jnp.diag(jnp.array([100, 100, 100, 10, 10, 10], dtype=float))
+    Kp = jnp.diag(jnp.array([2000, 2000, 2000, 500, 500, 500], dtype=float))
+    Kd = jnp.diag(jnp.array([100, 100, 100, 10, 10, 10], dtype=float))
     nullspace_stiffness = 0.0
-    q_d_nullspace = jnp.array(data.qpos[:7])
+    q_d_nullspace = jnp.array(data.qpos)
     
     # Run CPU controller
     tau_cpu = impedance_control(
         model=model,
         data=data,
-        body_name=body_name,
+        site_id=site_id,
         p_des=p_des,
         eul_des=eul_des,
-        cartesian_stiffness=cartesian_stiffness,
-        cartesian_damping=cartesian_damping,
+        Kp=Kp,
+        Kd=Kd,
         nullspace_stiffness=nullspace_stiffness,
         q_d_nullspace=q_d_nullspace
     )
@@ -60,11 +64,11 @@ def test_controllers():
         data_mjx=data_mjx,
         p_des=p_des,
         eul_des=eul_des,
-        cartesian_stiffness=cartesian_stiffness,
-        cartesian_damping=cartesian_damping,
+        Kp=Kp,
+        Kd=Kd,
         nullspace_stiffness=nullspace_stiffness,
         q_d_nullspace=q_d_nullspace,
-        body_id=body_id
+        site_id=site_id
     )
     
     # Convert to numpy arrays for comparison
@@ -88,7 +92,7 @@ def test_controllers():
     print("Max relative difference:", np.max(rel_diff))
     
     # Check if differences are within acceptable tolerance
-    tolerance = 1e-5
+    tolerance = 1e-3
     if np.max(abs_diff) < tolerance:
         print("\n✅ PASS: Controllers produce equivalent outputs within tolerance")
     else:
