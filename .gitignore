@@ -4,3 +4,10 @@ __pycache__
 *.pyd
 *.pyw
 *.pyz
+*.egg-info
+*.egg
+*.whl
+*.dist-info
+*.tar.gz
+*.tar.bz2
+MUJOCO_LOG.TXT
