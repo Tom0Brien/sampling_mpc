@@ -1,11 +1,14 @@
 [project]
-name = "impedance-mppi"
+name = "mppii"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "evosax>=0.1.6",
     "jax[cuda12]>=0.5.2",
     "mujoco>=3.3.0",
     "mujoco-mjx>=3.3.0",
 ]
+[tool.setuptools]
+packages = ["mppii"]

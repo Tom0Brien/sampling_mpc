@@ -65,11 +65,11 @@ def impedance_control(
     return tau_task + tau_cor + tau_null
 
 if __name__ == "__main__":
-    xml_path= "models/franka_emika_panda/mjx_scene.xml"
+    xml_path = ROOT + "/models/franka_emika_panda/mjx_scene.xml"
+    model = mujoco.MjModel.from_xml_path(xml_path)
     sim_time=20.0
     render_fps=120.0
     fixed_camera_id=None
-    model = mujoco.MjModel.from_xml_path(xml_path)
     data = mujoco.MjData(model)
     dt = model.opt.timestep
     steps = int(sim_time / float(dt)) 

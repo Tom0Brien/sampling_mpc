@@ -1,0 +1,4 @@
+evosax>=0.1.6
+jax[cuda12]>=0.5.2
+mujoco>=3.3.0
+mujoco-mjx>=3.3.0

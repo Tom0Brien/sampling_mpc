@@ -15,6 +15,7 @@ from typing import Tuple, List, Optional
 from mujoco.mjx._src.support import jac
 from util import *
 import os 
+from mppii import ROOT
 
 # Set XLA flags for better performance
 os.environ["XLA_FLAGS"] = "--xla_gpu_triton_gemm_any=true "
@@ -272,7 +273,7 @@ def visualize_rollouts(
         time.sleep(1.0)
 
 if __name__ == "__main__":
-    xml_path = "models/franka_emika_panda/mjx_scene.xml"
+    xml_path = ROOT + "/models/franka_emika_panda/mjx_scene.xml"
     model = mujoco.MjModel.from_xml_path(xml_path)
     
     # Set up simulation parameters

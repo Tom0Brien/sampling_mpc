@@ -1,0 +1,45 @@
+from typing import Dict
+
+import jax
+import jax.numpy as jnp
+import mujoco
+from mujoco import mjx
+
+from mppii import ROOT
+from mppii.task_base import Task
+
+
+class Franka(Task):
+    """Franka to reach a target position."""
+
+    def __init__(
+        self, planning_horizon: int = 5, sim_steps_per_control_step: int = 5
+    ):
+        """Load the MuJoCo model and set task parameters."""
+        mj_model = mujoco.MjModel.from_xml_path(
+            ROOT + "/models/franka_emika_panda/mjx_scene.xml"
+        )
+
+        super().__init__(
+            mj_model,
+            planning_horizon=planning_horizon,
+            sim_steps_per_control_step=sim_steps_per_control_step,
+            trace_sites=["gripper"],
+        )
+
+        self.gripper_id = mj_model.site("gripper").id
+
+    def running_cost(self, state: mjx.Data, control: jax.Array) -> jax.Array:
+        """The running cost ℓ(xₜ, uₜ) encourages target tracking."""
+        state_cost = self.terminal_cost(state)
+        control_cost = jnp.sum(jnp.square(control))
+        return state_cost + 0.1 * control_cost
+
+    def terminal_cost(self, state: mjx.Data) -> jax.Array:
+        """The terminal cost ϕ(x_T)."""
+        position_cost = jnp.sum(
+            jnp.square(state.site_xpos[self.gripper_id] - jnp.array([0.5, 0.0, 0.3]))
+        )
+        velocity_cost = jnp.sum(jnp.square(state.qvel))
+        return 5.0 * position_cost + 0.1 * velocity_cost
+

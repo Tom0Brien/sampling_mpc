@@ -1,0 +1,14 @@
+Metadata-Version: 2.2
+Name: mppii
+Version: 0.1.0
+Summary: Add your description here
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: evosax>=0.1.6
+Requires-Dist: jax[cuda12]>=0.5.2
+Requires-Dist: mujoco>=3.3.0
+Requires-Dist: mujoco-mjx>=3.3.0
+
+# impedance_mppi
+ 

@@ -1,5 +1,5 @@
 <mujoco model="panda scene">
-  <include file="mjx_panda.xml"/>
+  <include file="mjx_panda_cartesian.xml"/>
 
   <statistic center="0.3 0 0.4" extent="1"/>
 
@@ -8,7 +8,7 @@
   </option>
 
   <custom>
-    <numeric data="12" name="max_contact_points"/>
+    <numeric data="1" name="max_contact_points"/>
   </custom>
 
   <visual>
