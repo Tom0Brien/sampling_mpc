@@ -5,7 +5,7 @@ import mujoco
 
 from mppii.algs import MPPI, Evosax, PredictiveSampling
 from mppii.simulation.deterministic import run_interactive
-from mppii.tasks.franka import Franka
+from mppii.tasks.franka_reach import FrankaReach
 
 """
 Run an interactive simulation of the particle tracking task.
@@ -14,7 +14,7 @@ Double click on the green target, then drag it around with [ctrl + right-click].
 """
 
 # Define the task (cost and dynamics)
-task = Franka()
+task = FrankaReach() 
 
 # Print control dimensions
 print(f"Control dimensions: {task.model.nu}")
@@ -42,29 +42,29 @@ if args.algorithm == "ps" or args.algorithm is None:
     print("Running predictive sampling")
     ctrl = PredictiveSampling(
         task,
-        num_samples=16,
-        noise_level=0.1,
+        num_samples=128,
+        noise_level=1,
     )
 
 elif args.algorithm == "mppi":
     print("Running MPPI")
-    ctrl = MPPI(task, num_samples=5, noise_level=0.01, temperature=0.01)
+    ctrl = MPPI(task, num_samples=128, noise_level=0.01, temperature=0.1)
 
 elif args.algorithm == "cmaes":
     print("Running CMA-ES")
-    ctrl = Evosax(task, evosax.Sep_CMA_ES, num_samples=16, elite_ratio=0.5)
+    ctrl = Evosax(task, evosax.Sep_CMA_ES, num_samples=128, elite_ratio=0.5)
 
 elif args.algorithm == "samr":
     print("Running genetic algorithm with Self-Adaptation Mutation Rate (SAMR)")
-    ctrl = Evosax(task, evosax.SAMR_GA, num_samples=16)
+    ctrl = Evosax(task, evosax.SAMR_GA, num_samples=128)
 
 elif args.algorithm == "de":
     print("Running Differential Evolution (DE)")
-    ctrl = Evosax(task, evosax.DE, num_samples=16)
+    ctrl = Evosax(task, evosax.DE, num_samples=128)
 
 elif args.algorithm == "gld":
     print("Running Gradient-Less Descent (GLD)")
-    ctrl = Evosax(task, evosax.GLD, num_samples=16)
+    ctrl = Evosax(task, evosax.GLD, num_samples=128)
 
 elif args.algorithm == "rs":
     print("Running uniform random search")
@@ -73,7 +73,7 @@ elif args.algorithm == "rs":
         range_max=1.0,
     )
     ctrl = Evosax(
-        task, evosax.RandomSearch, num_samples=16, es_params=es_params
+        task, evosax.RandomSearch, num_samples=128, es_params=es_params
     )
 else:
     parser.error("Invalid algorithm")
@@ -81,6 +81,8 @@ else:
 # Define the model used for simulation
 mj_model = task.mj_model
 mj_data = mujoco.MjData(mj_model)
+# Set the initial joint positions
+mj_data.qpos[:7] = [-0.196, -0.189, 0.182, -2.1, 0.0378, 1.91, 0.756]
 
 # Run the interactive simulation
 run_interactive(

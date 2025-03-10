@@ -6,8 +6,9 @@ from mppii import ROOT
 
 def main():
     # Load the MuJoCo model from the XML file.
-    model = mujoco.MjModel.from_xml_path(ROOT + "/models/franka_emika_panda/mjx_scene.xml")
+    model = mujoco.MjModel.from_xml_path(ROOT + "/models/franka_emika_panda/mjx_scene_box_push.xml")
     data = mujoco.MjData(model)
+    data.qpos[:7] = [-0.196, -0.189, 0.182, -2.1, 0.0378, 1.91, 0.756]
 
     # Simulate indefinitely.
     with mujoco.viewer.launch_passive(model, data) as viewer:

@@ -7,9 +7,9 @@ from mujoco import mjx
 
 from mppii import ROOT
 from mppii.task_base import Task
+from mppii.util import mat_to_quat, eul_to_quat, orientation_error
 
-
-class Franka(Task):
+class FrankaReach(Task):
     """Franka to reach a target position."""
 
     def __init__(
@@ -17,7 +17,7 @@ class Franka(Task):
     ):
         """Load the MuJoCo model and set task parameters."""
         mj_model = mujoco.MjModel.from_xml_path(
-            ROOT + "/models/franka_emika_panda/mjx_scene.xml"
+            ROOT + "/models/franka_emika_panda/mjx_scene_reach.xml"
         )
 
         super().__init__(
@@ -37,9 +37,17 @@ class Franka(Task):
 
     def terminal_cost(self, state: mjx.Data) -> jax.Array:
         """The terminal cost ϕ(x_T)."""
+        desired_position = jnp.array([0.5, 0.0, 0.5])
+        desired_orientation = jnp.array([0.0, -1.0, 0.0, 0.0]) # quat
         position_cost = jnp.sum(
-            jnp.square(state.site_xpos[self.gripper_id] - jnp.array([0.5, 0.0, 0.3]))
+            jnp.square(state.site_xpos[self.gripper_id] - desired_position)
         )
+        # Quaternion difference - compute angular distance between quaternions
+        current_rot = state.site_xmat[self.gripper_id].reshape((3, 3))
+        current_quat = mat_to_quat(current_rot)
+        ori_error = orientation_error(current_quat, desired_orientation, current_rot)
+        orientation_cost = jnp.sum(jnp.square(ori_error))
+        
         velocity_cost = jnp.sum(jnp.square(state.qvel))
-        return 5.0 * position_cost + 0.1 * velocity_cost
+        return 5.0 * position_cost + 2.0 * orientation_cost + 0.1 * velocity_cost
 
