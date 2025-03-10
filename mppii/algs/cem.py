@@ -78,9 +78,7 @@ class CEM(SamplingBasedController):
         controls = params.mean + params.cov * noise
         return controls, params.replace(rng=rng)
 
-    def update_params(
-        self, params: CEMParams, rollouts: Trajectory
-    ) -> CEMParams:
+    def update_params(self, params: CEMParams, rollouts: Trajectory) -> CEMParams:
         """Update the mean with an exponentially weighted average."""
         costs = jnp.sum(rollouts.costs, axis=1)  # sum over time steps
 
@@ -90,9 +88,7 @@ class CEM(SamplingBasedController):
 
         # The new proposal distribution is a Gaussian fit to the elites.
         mean = jnp.mean(rollouts.controls[elites], axis=0)
-        cov = jnp.maximum(
-            jnp.std(rollouts.controls[elites], axis=0), self.sigma_min
-        )
+        cov = jnp.maximum(jnp.std(rollouts.controls[elites], axis=0), self.sigma_min)
 
         return params.replace(mean=mean, cov=cov)
 

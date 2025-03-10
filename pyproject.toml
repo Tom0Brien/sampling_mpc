@@ -12,3 +12,8 @@ dependencies = [
 ]
 [tool.setuptools]
 packages = ["mppii"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.9.10",
+]

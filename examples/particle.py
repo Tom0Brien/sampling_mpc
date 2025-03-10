@@ -72,9 +72,7 @@ elif args.algorithm == "rs":
         range_min=-1.0,
         range_max=1.0,
     )
-    ctrl = Evosax(
-        task, evosax.RandomSearch, num_samples=16, es_params=es_params
-    )
+    ctrl = Evosax(task, evosax.RandomSearch, num_samples=16, es_params=es_params)
 else:
     parser.error("Invalid algorithm")
 

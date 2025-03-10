@@ -124,9 +124,7 @@ def run_controller(
     # Jit the optimizer step, then signal that we're ready to go
     print("Jitting controller...")
     st = time.time()
-    jit_optimize = jax.jit(
-        lambda d, p: ctrl.optimize(d, p)[0], donate_argnums=(1,)
-    )
+    jit_optimize = jax.jit(lambda d, p: ctrl.optimize(d, p)[0], donate_argnums=(1,))
     get_action = jax.jit(ctrl.get_action)
     policy_params = jit_optimize(mjx_data, policy_params)
     print(f"Time to jit: {time.time() - st}")
@@ -155,12 +153,10 @@ def run_controller(
         # Send the action to the simulator.
         # TODO: send the full parameters rather than assuming zero-order
         # hold and a sufficiently high control rate
-        shm_data.ctrl[:] = np.array(
-            get_action(policy_params, 0.0), dtype=np.float32
-        )
+        shm_data.ctrl[:] = np.array(get_action(policy_params, 0.0), dtype=np.float32)
 
         # Print the current planning frequency
-        print(f"Controller running at {1/(time.time() - st):.2f} Hz", end="\r")
+        print(f"Controller running at {1 / (time.time() - st):.2f} Hz", end="\r")
 
     # Preserve the last printed line
     print("")

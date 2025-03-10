@@ -14,7 +14,7 @@ Double click on the green target, then drag it around with [ctrl + right-click].
 """
 
 # Define the task (cost and dynamics)
-task = FrankaReach() 
+task = FrankaReach()
 
 # Print control dimensions
 print(f"Control dimensions: {task.model.nu}")
@@ -72,9 +72,7 @@ elif args.algorithm == "rs":
         range_min=-1.0,
         range_max=1.0,
     )
-    ctrl = Evosax(
-        task, evosax.RandomSearch, num_samples=128, es_params=es_params
-    )
+    ctrl = Evosax(task, evosax.RandomSearch, num_samples=128, es_params=es_params)
 else:
     parser.error("Invalid algorithm")
 

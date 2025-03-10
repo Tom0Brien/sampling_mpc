@@ -80,14 +80,10 @@ class Evosax(SamplingBasedController):
         opt_state = self.strategy.initialize(init_rng, self.es_params)
         return EvosaxParams(controls=controls, opt_state=opt_state, rng=rng)
 
-    def sample_controls(
-        self, params: EvosaxParams
-    ) -> Tuple[jax.Array, EvosaxParams]:
+    def sample_controls(self, params: EvosaxParams) -> Tuple[jax.Array, EvosaxParams]:
         """Sample control sequences from the proposal distribution."""
         rng, sample_rng = jax.random.split(params.rng)
-        x, opt_state = self.strategy.ask(
-            sample_rng, params.opt_state, self.es_params
-        )
+        x, opt_state = self.strategy.ask(sample_rng, params.opt_state, self.es_params)
 
         # evosax works with vectors of decision variables, so we reshape U to
         # [batch_size, horizon, nu].
@@ -102,15 +98,11 @@ class Evosax(SamplingBasedController):
 
         return controls, params.replace(opt_state=opt_state, rng=rng)
 
-    def update_params(
-        self, params: EvosaxParams, rollouts: Trajectory
-    ) -> EvosaxParams:
+    def update_params(self, params: EvosaxParams, rollouts: Trajectory) -> EvosaxParams:
         """Update the policy parameters based on the rollouts."""
         costs = jnp.sum(rollouts.costs, axis=1)  # sum over time steps
         x = jnp.reshape(rollouts.controls, (self.strategy.popsize, -1))
-        opt_state = self.strategy.tell(
-            x, costs, params.opt_state, self.es_params
-        )
+        opt_state = self.strategy.tell(x, costs, params.opt_state, self.es_params)
 
         best_idx = jnp.argmin(costs)
         best_controls = rollouts.controls[best_idx]

@@ -48,6 +48,6 @@
     </body>
 
     <!-- goal visualization -->
-    <site name="goal" pos="0.6 0.2 0.4" size="0.03 0.03 0.03" rgba="0 1 0 0.3" type="box"/>
+    <site name="goal" pos="0.7 0.0 0.4" size="0.03 0.03 0.03" rgba="0 1 0 0.3" type="box"/>
   </worldbody>
 </mujoco>

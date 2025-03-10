@@ -124,9 +124,7 @@ class SamplingBasedController(ABC):
         if self.num_randomizations > 1:
             # Randomize the initial states for each domain randomization
             subrngs = jax.random.split(rng, self.num_randomizations)
-            randomizations = jax.vmap(self.task.domain_randomize_data)(
-                states, subrngs
-            )
+            randomizations = jax.vmap(self.task.domain_randomize_data)(states, subrngs)
             states = states.tree_replace(randomizations)
 
         # Apply the control sequences, parallelized over both rollouts and
@@ -140,9 +138,7 @@ class SamplingBasedController(ABC):
         costs = self.risk_strategy.combine_costs(rollouts.costs)
         controls = rollouts.controls[0]  # identical over randomizations
         trace_sites = rollouts.trace_sites[0]  # visualization only, take 1st
-        return rollouts.replace(
-            costs=costs, controls=controls, trace_sites=trace_sites
-        )
+        return rollouts.replace(costs=costs, controls=controls, trace_sites=trace_sites)
 
     @partial(jax.vmap, in_axes=(None, None, None, 0))
     def eval_rollouts(

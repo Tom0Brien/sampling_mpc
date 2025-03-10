@@ -65,7 +65,7 @@ def run_interactive(
     actual_frequency = 1.0 / step_dt
     print(
         f"Planning at {actual_frequency} Hz, "
-        f"simulating at {1.0/mj_model.opt.timestep} Hz"
+        f"simulating at {1.0 / mj_model.opt.timestep} Hz"
     )
 
     # Initialize the controller

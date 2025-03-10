@@ -65,9 +65,7 @@ class MPPI(SamplingBasedController):
         mean = jnp.zeros((self.task.planning_horizon, self.task.model.nu))
         return MPPIParams(mean=mean, rng=rng)
 
-    def sample_controls(
-        self, params: MPPIParams
-    ) -> Tuple[jax.Array, MPPIParams]:
+    def sample_controls(self, params: MPPIParams) -> Tuple[jax.Array, MPPIParams]:
         """Sample a control sequence."""
         rng, sample_rng = jax.random.split(params.rng)
         noise = jax.random.normal(
@@ -81,9 +79,7 @@ class MPPI(SamplingBasedController):
         controls = params.mean + self.noise_level * noise
         return controls, params.replace(rng=rng)
 
-    def update_params(
-        self, params: MPPIParams, rollouts: Trajectory
-    ) -> MPPIParams:
+    def update_params(self, params: MPPIParams, rollouts: Trajectory) -> MPPIParams:
         """Update the mean with an exponentially weighted average."""
         costs = jnp.sum(rollouts.costs, axis=1)  # sum over time steps
         # N.B. jax.nn.softmax takes care of details like baseline subtraction.
