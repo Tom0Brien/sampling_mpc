@@ -41,7 +41,7 @@
     </body>
 
     <!-- pushable box -->
-    <body name="box" pos="0.6 0 0.4">
+    <body name="box" pos="0.55 0 0.4">
       <joint type="free"/>
       <geom name="box_geom" type="box" size="0.03 0.03 0.03" material="box" friction="1 0.005 0.0001"/>
       <site name="box_site" pos="0 0 0" size="0.005"/>

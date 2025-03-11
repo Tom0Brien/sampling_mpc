@@ -5,13 +5,16 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "evosax>=0.1.6",
+    "evosax",
     "jax[cuda12]>=0.5.2",
     "mujoco>=3.3.0",
     "mujoco-mjx>=3.3.0",
 ]
 [tool.setuptools]
 packages = ["mppii"]
+
+[tool.uv.sources]
+evosax = { git = "https://github.com/RobertTLange/evosax", rev = "04f9ad4680900a7a56becb39dcccf1ead3389669" }
 
 [dependency-groups]
 dev = [

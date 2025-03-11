@@ -13,7 +13,9 @@ from mppii.util import mat_to_quat, eul_to_quat, orientation_error
 class FrankaReach(Task):
     """Franka to reach a target position."""
 
-    def __init__(self, planning_horizon: int = 5, sim_steps_per_control_step: int = 5):
+    def __init__(
+        self, planning_horizon: int = 20, sim_steps_per_control_step: int = 20
+    ):
         """Load the MuJoCo model and set task parameters."""
         mj_model = mujoco.MjModel.from_xml_path(
             ROOT + "/models/franka_emika_panda/mjx_scene_reach.xml"
@@ -27,6 +29,7 @@ class FrankaReach(Task):
         )
 
         self.gripper_id = mj_model.site("gripper").id
+        self.reference_id = mj_model.site("reference").id
 
     def running_cost(self, state: mjx.Data, control: jax.Array) -> jax.Array:
         """The running cost ℓ(xₜ, uₜ) encourages target tracking."""
@@ -48,4 +51,4 @@ class FrankaReach(Task):
         orientation_cost = jnp.sum(jnp.square(ori_error))
 
         velocity_cost = jnp.sum(jnp.square(state.qvel))
-        return 5.0 * position_cost + 2.0 * orientation_cost + 0.1 * velocity_cost
+        return 5.0 * position_cost + 2.0 * orientation_cost + 0.0 * velocity_cost

@@ -139,7 +139,7 @@
 
   <worldbody>
     <light name="top" pos="0 0 2" mode="trackcom"/>
-    <site name="reference" pos="0.5 0.0 0.4" 	euler="-3.14 0 0.0" size="0.01" rgba="1 0 0 1"/>
+    <site name="reference" pos="0.5 0.0 0.4" 	euler="-3.14 0 0.0" size="0.01" rgba="1 0 0 0"/>
     <body name="link0" childclass="panda" gravcomp="1">
       <inertial mass="0.629769" pos="-0.041018 -0.00014 0.049974"
         fullinertia="0.00315 0.00388 0.004285 8.2904e-7 0.00015 8.2299e-6"/>

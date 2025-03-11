@@ -35,6 +35,7 @@ subparsers.add_parser(
 subparsers.add_parser("de", help="Differential Evolution")
 subparsers.add_parser("gld", help="Gradient-Less Descent")
 subparsers.add_parser("rs", help="Uniform Random Search")
+subparsers.add_parser("diffusion", help="Diffusion Evolution")
 args = parser.parse_args()
 
 # Set the controller based on command-line arguments
@@ -43,12 +44,12 @@ if args.algorithm == "ps" or args.algorithm is None:
     ctrl = PredictiveSampling(
         task,
         num_samples=128,
-        noise_level=1,
+        noise_level=0.05,
     )
 
 elif args.algorithm == "mppi":
     print("Running MPPI")
-    ctrl = MPPI(task, num_samples=128, noise_level=0.01, temperature=0.1)
+    ctrl = MPPI(task, num_samples=128, noise_level=0.05, temperature=0.1)
 
 elif args.algorithm == "cmaes":
     print("Running CMA-ES")
@@ -73,6 +74,13 @@ elif args.algorithm == "rs":
         range_max=1.0,
     )
     ctrl = Evosax(task, evosax.RandomSearch, num_samples=128, es_params=es_params)
+
+elif args.algorithm == "diffusion":
+    print("Running Diffusion Evolution")
+    es_params = evosax.strategies.diffusion.EvoParams(
+        sigma_init=0.01, scale_factor=0.1, fitness_map_temp=1.0
+    )
+    ctrl = Evosax(task, evosax.DiffusionEvolution, num_samples=128, es_params=es_params)
 else:
     parser.error("Invalid algorithm")
 

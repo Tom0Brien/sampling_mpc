@@ -222,3 +222,23 @@ def mat_to_quat(R):
     z = jnp.where(cond1, z1, jnp.where(cond2, z2, jnp.where(cond3, z3, z4)))
 
     return jnp.array([w, x, y, z])
+
+
+def mat_to_rpy(R):
+    """Convert a 3x3 rotation matrix to Euler angles (roll, pitch, yaw)."""
+    # Handle singularity case (gimbal lock) when R[2,0] is close to +/-1
+    # pitch = -arcsin(R[2,0])
+    pitch = -jnp.arcsin(jnp.clip(R[2, 0], -1.0, 1.0))
+
+    # Compute roll and yaw based on pitch
+    # Use epsilon to avoid division by zero in the singularity case
+    epsilon = 1e-10
+    cos_pitch = jnp.cos(pitch)
+
+    # roll = atan2(R[2,1]/cos(pitch), R[2,2]/cos(pitch))
+    roll = jnp.arctan2(R[2, 1] / (cos_pitch + epsilon), R[2, 2] / (cos_pitch + epsilon))
+
+    # yaw = atan2(R[1,0]/cos(pitch), R[0,0]/cos(pitch))
+    yaw = jnp.arctan2(R[1, 0] / (cos_pitch + epsilon), R[0, 0] / (cos_pitch + epsilon))
+
+    return jnp.array([roll, pitch, yaw])

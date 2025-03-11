@@ -140,7 +140,7 @@ epy = [
 [[package]]
 name = "evosax"
 version = "0.1.6"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/RobertTLange/evosax?rev=04f9ad4680900a7a56becb39dcccf1ead3389669#04f9ad4680900a7a56becb39dcccf1ead3389669" }
 dependencies = [
     { name = "chex" },
     { name = "dotmap" },
@@ -150,10 +150,6 @@ dependencies = [
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "pyyaml" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/54/1c/42c78cae403ee993a99f6f5645cb7202111beac80a5fd2dd2f31c52f823e/evosax-0.1.6.tar.gz", hash = "sha256:bc3dd032191f2f878b08127e0c88d270d08fc95e80b379509b14dc265f29484b", size = 196800 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/24/f8/a58890d615e548de5003a38636d8986e226805bbcb27aab206e1c8430f57/evosax-0.1.6-py3-none-any.whl", hash = "sha256:195145d68c67f5f1de9c580b6f248f624ac9d089de628e67665f7b3616d638e4", size = 240393 },
 ]
 
 [[package]]
@@ -563,7 +559,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "evosax", specifier = ">=0.1.6" },
+    { name = "evosax", git = "https://github.com/RobertTLange/evosax?rev=04f9ad4680900a7a56becb39dcccf1ead3389669" },
     { name = "jax", extras = ["cuda12"], specifier = ">=0.5.2" },
     { name = "mujoco", specifier = ">=3.3.0" },
     { name = "mujoco-mjx", specifier = ">=3.3.0" },

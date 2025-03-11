@@ -7,7 +7,7 @@ from mujoco import mjx
 
 from mppii import ROOT
 from mppii.task_base import Task
-from mppii.util import mat_to_quat, eul_to_quat, orientation_error
+from mppii.util import mat_to_quat, eul_to_quat, orientation_error, mat_to_rpy
 
 
 class FrankaPush(Task):
@@ -23,12 +23,13 @@ class FrankaPush(Task):
             mj_model,
             planning_horizon=planning_horizon,
             sim_steps_per_control_step=sim_steps_per_control_step,
-            trace_sites=["box_site", "goal"],
+            trace_sites=["gripper"],
         )
 
         self.gripper_id = mj_model.site("gripper").id
         self.box_id = mj_model.body("box").id
         self.box_site_id = mj_model.site("box_site").id
+        self.reference_id = mj_model.site("reference").id
 
     def running_cost(self, state: mjx.Data, control: jax.Array) -> jax.Array:
         """The running cost ℓ(xₜ, uₜ) encourages pushing the box to the goal."""
@@ -52,16 +53,20 @@ class FrankaPush(Task):
         # Scale gripper-to-box cost based on box's distance to goal
         gripper_pos = state.site_xpos[self.gripper_id]
         box_to_gripper_cost = jnp.sum(jnp.square(gripper_pos - current_box_pos))
-        # Higher weight when box is far from goal, lower weight when close
-        distance_to_goal = jnp.sqrt(box_pos_cost)
-        gripper_cost_scale = 10.0 * jnp.clip(distance_to_goal, 0.0, 1.0)
 
+        # Desired gripper orientation (roll and pitch, yaw should be able to vary)
+        gripper_rot = state.site_xmat[self.gripper_id].reshape((3, 3))
+        gripper_rpy = mat_to_rpy(gripper_rot)
+        gripper_orientation_cost = jnp.sum(
+            jnp.square(gripper_rpy[:2] - jnp.array([-3.14, 0.0]))
+        )
         # Penalize high velocities
         velocity_cost = jnp.sum(jnp.square(state.qvel))
 
         return (
-            25.0 * box_pos_cost  # Box position
+            50.0 * box_pos_cost  # Box position
             + 0.0 * box_orientation_cost  # Box orientation
-            + 5 * box_to_gripper_cost  # Adaptive gripper-box coupling
+            + 5.0 * box_to_gripper_cost  # Adaptive gripper-box coupling
+            + 10.0 * gripper_orientation_cost  # Gripper orientation
             + 0.0 * velocity_cost  # Smooth motion
         )

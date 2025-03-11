@@ -36,6 +36,7 @@ subparsers.add_parser("de", help="Differential Evolution")
 subparsers.add_parser("gld", help="Gradient-Less Descent")
 subparsers.add_parser("rs", help="Uniform Random Search")
 subparsers.add_parser("sa", help="Simulated Annealing")
+subparsers.add_parser("diffusion", help="Diffusion Evolution")
 
 args = parser.parse_args()
 
@@ -44,7 +45,7 @@ if args.algorithm == "ps" or args.algorithm is None:
     print("Running predictive sampling")
     ctrl = PredictiveSampling(
         task,
-        num_samples=128,
+        num_samples=1,
         noise_level=0.01,
     )
 
@@ -58,7 +59,7 @@ elif args.algorithm == "cmaes":
 
 elif args.algorithm == "samr":
     print("Running genetic algorithm with Self-Adaptation Mutation Rate (SAMR)")
-    ctrl = Evosax(task, evosax.SAMR_GA, num_samples=128)
+    ctrl = Evosax(task, evosax.SAMR_GA, num_samples=1024)
 
 elif args.algorithm == "de":
     print("Running Differential Evolution (DE)")
@@ -79,6 +80,18 @@ elif args.algorithm == "rs":
         range_max=1.0,
     )
     ctrl = Evosax(task, evosax.RandomSearch, num_samples=128, es_params=es_params)
+
+elif args.algorithm == "diffusion":
+    print("Running Diffusion Evolution")
+    es_params = evosax.strategies.diffusion.EvoParams(
+        sigma_init=0.01, scale_factor=0.1, fitness_map_temp=3.0
+    )
+    ctrl = Evosax(
+        task,
+        evosax.DiffusionEvolution,
+        num_samples=1024,
+        es_params=es_params,
+    )
 else:
     parser.error("Invalid algorithm")
 
@@ -86,8 +99,8 @@ else:
 mj_model = task.mj_model
 mj_data = mujoco.MjData(mj_model)
 # Set the initial joint positions
+# mj_data.qpos[:7] = [-0.199, -0.149, 0.179, -1.72, 0.028, 1.57, 0.763]
 mj_data.qpos[:7] = [-0.196, -0.189, 0.182, -2.1, 0.0378, 1.91, 0.756]
-
 # Run the interactive simulation
 run_interactive(
     ctrl,
@@ -96,4 +109,6 @@ run_interactive(
     frequency=10,
     show_traces=True,
     max_traces=6,
+    trace_width=6,
+    trace_color=[0.0, 0.0, 1.0, 0.5],
 )
