@@ -20,10 +20,10 @@ class Particle(Task):
             mj_model,
             planning_horizon=planning_horizon,
             sim_steps_per_control_step=sim_steps_per_control_step,
-            trace_sites=["pointmass"],
+            trace_sites=["particle"],
         )
 
-        self.pointmass_id = mj_model.site("pointmass").id
+        self.particle_id = mj_model.site("particle").id
 
     def running_cost(self, state: mjx.Data, control: jax.Array) -> jax.Array:
         """The running cost ℓ(xₜ, uₜ) encourages target tracking."""
@@ -34,7 +34,7 @@ class Particle(Task):
     def terminal_cost(self, state: mjx.Data) -> jax.Array:
         """The terminal cost ϕ(x_T)."""
         position_cost = jnp.sum(
-            jnp.square(state.site_xpos[self.pointmass_id] - state.mocap_pos[0])
+            jnp.square(state.site_xpos[self.particle_id] - state.mocap_pos[0])
         )
         velocity_cost = jnp.sum(jnp.square(state.qvel))
         return 5.0 * position_cost + 0.1 * velocity_cost
