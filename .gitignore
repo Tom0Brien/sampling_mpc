@@ -11,3 +11,5 @@ __pycache__
 *.tar.gz
 *.tar.bz2
 MUJOCO_LOG.TXT
+recordings/*
+build
