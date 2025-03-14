@@ -111,4 +111,5 @@ run_interactive(
     max_traces=6,
     trace_width=6,
     trace_color=[0.0, 0.0, 1.0, 0.5],
+    record_video=False,
 )
