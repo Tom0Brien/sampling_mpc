@@ -7,6 +7,7 @@ import mujoco
 import mujoco.viewer
 import numpy as np
 from mujoco import mjx
+import mediapy as media
 
 from mppii.alg_base import SamplingBasedController
 
@@ -26,6 +27,8 @@ def run_interactive(
     max_traces: int = 5,
     trace_width: float = 5.0,
     trace_color: Sequence = [1.0, 1.0, 1.0, 0.1],
+    record_video: bool = False,
+    video_path: str = None,
 ) -> None:
     """Run an interactive simulation with the MPC controller.
 
@@ -82,6 +85,17 @@ def run_interactive(
     policy_params, rollouts = jit_optimize(mjx_data, policy_params)
     print(f"Time to jit: {time.time() - st:.3f} seconds")
     num_traces = min(rollouts.controls.shape[1], max_traces)
+
+    # For video recording
+    frames = []
+    cam = mujoco.MjvCamera()
+    # Move the camera 0.5m in the +x direction
+    cam.lookat = [0.5, 0.0, 0.5]
+    mujoco.mjv_defaultCamera(cam)
+    if record_video:
+        renderer = mujoco.Renderer(mj_model, height=1080, width=1920)
+        # Print in green recording video
+        print("\033[92mRecording video...\033[0m")
 
     # Start the simulation
     with mujoco.viewer.launch_passive(mj_model, mj_data) as viewer:
@@ -145,6 +159,10 @@ def run_interactive(
                 mujoco.mj_step(mj_model, mj_data)
                 viewer.sync()
 
+                if record_video:
+                    renderer.update_scene(mj_data, cam)
+                    frames.append(renderer.render())
+
             # Try to run in roughly realtime
             elapsed = time.time() - start_time
             if elapsed < step_dt:
@@ -159,3 +177,17 @@ def run_interactive(
 
     # Preserve the last printout
     print("")
+
+    # Save the video if recording was enabled
+    if record_video and frames:
+        if video_path is None:
+            video_path = f"recordings/simulation_{int(time.time())}.mp4"
+        print(f"Saving video to {video_path}...")
+
+        # For realtime playback, FPS should be 1/timestep
+        # Since we capture one frame per simulation step
+        effective_fps = 1.0 / mj_model.opt.timestep
+
+        print(f"Recording at effective FPS: {effective_fps:.2f} for realtime playback")
+        media.write_video(video_path, frames, fps=effective_fps)
+        print(f"Video saved successfully!")
