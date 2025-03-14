@@ -52,7 +52,7 @@ if args.algorithm == "ps" or args.algorithm is None:
 
 elif args.algorithm == "mppi":
     print("Running MPPI")
-    ctrl = MPPI(task, num_samples=1000, noise_level=0.1, temperature=0.05)
+    ctrl = MPPI(task, num_samples=1000, noise_level=0.4, temperature=0.05)
 
 elif args.algorithm == "cmaes":
     print("Running CMA-ES")
@@ -84,9 +84,7 @@ elif args.algorithm == "rs":
 
 elif args.algorithm == "diffusion":
     print("Running Diffusion Evolution")
-    es_params = evosax.strategies.diffusion.EvoParams(
-        sigma_init=0.01, scale_factor=0.1, fitness_map_temp=3.0
-    )
+    es_params = evosax.strategies.diffusion.EvoParams(sigma_init=0.02, scale_factor=1)
     ctrl = Evosax(
         task,
         evosax.DiffusionEvolution,
@@ -113,6 +111,6 @@ run_interactive(
     show_traces=True,
     max_traces=6,
     trace_width=6,
-    trace_color=[0.0, 0.0, 1.0, 0.5],
-    record_video=True,
+    trace_color=[0.0, 0.0, 1.0, 0.1],
+    record_video=False,
 )
