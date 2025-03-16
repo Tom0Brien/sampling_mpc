@@ -13,7 +13,10 @@ class PushBox(Task):
     """Push a box to a desired pose."""
 
     def __init__(
-        self, planning_horizon: int = 10, sim_steps_per_control_step: int = 10
+        self,
+        planning_horizon: int = 10,
+        sim_steps_per_control_step: int = 10,
+        optimize_gains: bool = False,
     ):
         """Load the MuJoCo model and set task parameters."""
         mj_model = mujoco.MjModel.from_xml_path(ROOT + "/models/pushbox/scene.xml")
@@ -23,6 +26,7 @@ class PushBox(Task):
             planning_horizon=planning_horizon,
             sim_steps_per_control_step=sim_steps_per_control_step,
             trace_sites=["pusher"],
+            optimize_gains=optimize_gains,
         )
 
         # Get sensor ids
@@ -61,7 +65,7 @@ class PushBox(Task):
         orientation_cost = jnp.sum(jnp.square(orientation_err))
         close_to_block_cost = jnp.sum(jnp.square(close_to_block_err))
 
-        return position_cost + orientation_cost + 0.01 * close_to_block_cost
+        return position_cost + orientation_cost + 0.1 * close_to_block_cost
 
     def terminal_cost(self, state: mjx.Data) -> jax.Array:
         """The terminal cost ℓ_T(x_T)."""

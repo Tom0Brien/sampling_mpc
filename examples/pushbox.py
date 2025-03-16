@@ -13,15 +13,15 @@ Run an interactive simulation of the push-T task.
 Double click on the green target to move the goal position.
 """
 
-# Define the task (cost and dynamics)
-task = PushBox()
-
-# Print control dimensions
-print(f"Control dimensions: {task.model.nu}")
 
 # Parse command-line arguments
 parser = argparse.ArgumentParser(
     description="Run an interactive simulation of the push-T task."
+)
+parser.add_argument(
+    "--optimize-gains",
+    action="store_true",
+    help="Optimize actuator gains along with control inputs",
 )
 subparsers = parser.add_subparsers(
     dest="algorithm", help="Sampling algorithm (choose one)"
@@ -39,6 +39,11 @@ subparsers.add_parser("sa", help="Simulated Annealing")
 subparsers.add_parser("diffusion", help="Diffusion Evolution")
 
 args = parser.parse_args()
+
+# Define the task (cost and dynamics)
+task = PushBox(optimize_gains=args.optimize_gains)
+# Print control dimensions
+print(f"Control dimensions: {task.model.nu}")
 
 # Set the controller based on command-line arguments
 if args.algorithm == "ps" or args.algorithm is None:
@@ -113,4 +118,6 @@ run_interactive(
     trace_width=6,
     trace_color=[0.0, 0.0, 1.0, 0.1],
     record_video=False,
+    plot_costs=True,
+    show_cost_overlay=True,
 )

@@ -161,16 +161,42 @@ class SamplingBasedController(ABC):
         ) -> Tuple[mjx.Data, Tuple[mjx.Data, jax.Array, jax.Array]]:
             """Compute the cost and observation, then advance the state."""
             x = mjx.forward(model, x)  # compute site positions
-            cost = self.task.dt * self.task.running_cost(x, u)
-            sites = self.task.get_trace_sites(x)
 
-            # Advance the state for several steps, zero-order hold on control
-            x = jax.lax.fori_loop(
-                0,
-                self.task.sim_steps_per_control_step,
-                lambda _, x: mjx.step(model, x),
-                x.replace(ctrl=u),
-            )
+            # Extract control and gains if optimizing gains
+            if self.task.optimize_gains:
+                ctrl, p_gains, d_gains = self.task.extract_gains(u)
+
+                # Update the actuator gain parameters in the model
+                updated_model = model
+                for i in range(self.task.nu_ctrl):
+                    updated_model = updated_model.replace(
+                        actuator_gainprm=updated_model.actuator_gainprm.at[i, 0]
+                        .set(p_gains[i])
+                        .at[i, 1]
+                        .set(d_gains[i])
+                    )
+
+                cost = self.task.dt * self.task.running_cost(x, u)
+                sites = self.task.get_trace_sites(x)
+
+                # Advance the state with updated model and control
+                x = jax.lax.fori_loop(
+                    0,
+                    self.task.sim_steps_per_control_step,
+                    lambda _, x: mjx.step(updated_model, x),
+                    x.replace(ctrl=ctrl),
+                )
+            else:
+                cost = self.task.dt * self.task.running_cost(x, u)
+                sites = self.task.get_trace_sites(x)
+
+                # Advance the state for several steps, zero-order hold on control
+                x = jax.lax.fori_loop(
+                    0,
+                    self.task.sim_steps_per_control_step,
+                    lambda _, x: mjx.step(model, x),
+                    x.replace(ctrl=u),
+                )
 
             return x, (x, cost, sites)
 

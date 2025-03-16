@@ -8,6 +8,7 @@ import mujoco.viewer
 import numpy as np
 from mujoco import mjx
 import mediapy as media
+import matplotlib.pyplot as plt
 
 from mppii.alg_base import SamplingBasedController
 
@@ -29,6 +30,8 @@ def run_interactive(
     trace_color: Sequence = [1.0, 1.0, 1.0, 0.1],
     record_video: bool = False,
     video_path: str = None,
+    plot_costs: bool = False,
+    show_cost_overlay: bool = True,
 ) -> None:
     """Run an interactive simulation with the MPC controller.
 
@@ -97,6 +100,11 @@ def run_interactive(
         # Print in green recording video
         print("\033[92mRecording video...\033[0m")
 
+    # For tracking costs and gains over time
+    cost_history = []
+    p_gain_history = []
+    d_gain_history = []
+
     # Start the simulation
     with mujoco.viewer.launch_passive(mj_model, mj_data) as viewer:
         if fixed_camera_id is not None:
@@ -123,6 +131,9 @@ def run_interactive(
         while viewer.is_running():
             start_time = time.time()
 
+            # Clear previous text overlays
+            viewer.user_scn.ngeom = 0
+
             # Set the start state for the controller
             mjx_data = mjx_data.replace(
                 qpos=jnp.array(mj_data.qpos),
@@ -135,6 +146,10 @@ def run_interactive(
             plan_start = time.time()
             policy_params, rollouts = jit_optimize(mjx_data, policy_params)
             plan_time = time.time() - plan_start
+
+            # Record cost history
+            total_cost = float(jnp.sum(rollouts.costs[0]))
+            cost_history.append(total_cost)
 
             # Visualize the rollouts
             if show_traces:
@@ -150,12 +165,91 @@ def run_interactive(
                                 rollouts.trace_sites[i, j + 1, k],
                             )
                             ii += 1
+                            viewer.user_scn.ngeom += 1
+
+            # Add cost and gain text overlays
+            if show_cost_overlay:
+                # Position for cost text - above the scene
+                cost_pos = np.array([0.0, 0.0, 0.5])
+
+                # Add cost text
+                geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
+                mujoco.mjv_initGeom(
+                    geom,
+                    type=mujoco.mjtGeom.mjGEOM_LABEL,
+                    size=np.array([0.2, 0.2, 0.2]),
+                    pos=cost_pos,
+                    mat=np.eye(3).flatten(),
+                    rgba=np.array([1, 1, 1, 1]),  # white text
+                )
+                geom.label = f"Cost: {total_cost:.4f}"
+                viewer.user_scn.ngeom += 1
+
+                # Add gain information if optimizing gains
+                if controller.task.optimize_gains:
+                    # Extract current gains for display
+                    _, current_p_gains, current_d_gains = controller.task.extract_gains(
+                        controller.get_action(policy_params, 0)
+                    )
+
+                    # Record gain history
+                    p_gain_history.append(np.array(current_p_gains))
+                    d_gain_history.append(np.array(current_d_gains))
+
+                    # Format gain text
+                    p_gain_text = (
+                        "P-gains: ["
+                        + ", ".join([f"{g:.2f}" for g in current_p_gains])
+                        + "]"
+                    )
+                    d_gain_text = (
+                        "D-gains: ["
+                        + ", ".join([f"{g:.2f}" for g in current_d_gains])
+                        + "]"
+                    )
+
+                    # Add P-gain text (positioned below cost text)
+                    geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
+                    mujoco.mjv_initGeom(
+                        geom,
+                        type=mujoco.mjtGeom.mjGEOM_LABEL,
+                        size=np.array([0.15, 0.15, 0.15]),
+                        pos=cost_pos
+                        - np.array([0.0, 0.0, 0.05]),  # position below cost
+                        mat=np.eye(3).flatten(),
+                        rgba=np.array([0.8, 0.8, 1.0, 1]),  # light blue text
+                    )
+                    geom.label = p_gain_text
+                    viewer.user_scn.ngeom += 1
+
+                    # Add D-gain text (positioned below P-gain text)
+                    geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
+                    mujoco.mjv_initGeom(
+                        geom,
+                        type=mujoco.mjtGeom.mjGEOM_LABEL,
+                        size=np.array([0.15, 0.15, 0.15]),
+                        pos=cost_pos
+                        - np.array([0.0, 0.0, 0.1]),  # position below P-gain
+                        mat=np.eye(3).flatten(),
+                        rgba=np.array([0.8, 1.0, 0.8, 1]),  # light green text
+                    )
+                    geom.label = d_gain_text
+                    viewer.user_scn.ngeom += 1
 
             # Step the simulation
             for i in range(sim_steps_per_replan):
                 t = i * mj_model.opt.timestep
                 u = controller.get_action(policy_params, t)
-                mj_data.ctrl[:] = np.array(u)
+                if controller.task.optimize_gains:
+                    # Extract control and gains
+                    ctrl, p_gains, d_gains = controller.task.extract_gains(u)
+                    # Update the actuator gain parameters in the model
+                    for j in range(controller.task.nu_ctrl):
+                        mj_model.actuator_gainprm[j, 0] = p_gains[j]
+                        mj_model.actuator_gainprm[j, 1] = d_gains[j]
+                    mj_data.ctrl[: controller.task.nu_ctrl] = np.array(ctrl)
+                else:
+                    mj_data.ctrl[:] = np.array(u)
                 mujoco.mj_step(mj_model, mj_data)
                 viewer.sync()
 
@@ -171,12 +265,65 @@ def run_interactive(
             # Print some timing information
             rtr = step_dt / (time.time() - start_time)
             print(
-                f"Realtime rate: {rtr:.2f}, plan time: {plan_time:.4f}s",
+                f"Realtime rate: {rtr:.2f}, plan time: {plan_time:.4f}s, cost: {total_cost:.4f}",
                 end="\r",
             )
 
     # Preserve the last printout
     print("")
+
+    # Plot cost and gain history if requested
+    if plot_costs and cost_history:
+        try:
+            # Create figure with multiple subplots
+            fig, axes = plt.subplots(
+                1 + (2 if controller.task.optimize_gains else 0),
+                1,
+                figsize=(10, 8),
+                sharex=True,
+            )
+
+            # If not optimizing gains, axes is not a list, so make it one for consistency
+            if not controller.task.optimize_gains:
+                axes = [axes]
+
+            # Plot cost history
+            axes[0].plot(cost_history)
+            axes[0].set_title("Total Cost Over Time")
+            axes[0].set_ylabel("Cost")
+            axes[0].grid(True)
+
+            # Plot gain histories if optimizing gains
+            if controller.task.optimize_gains and p_gain_history and d_gain_history:
+                # Convert lists of arrays to 2D arrays
+                p_gains_array = np.array(p_gain_history)
+                d_gains_array = np.array(d_gain_history)
+
+                # Plot P gains
+                for i in range(p_gains_array.shape[1]):
+                    axes[1].plot(p_gains_array[:, i], label=f"Actuator {i}")
+                axes[1].set_title("P Gains Over Time")
+                axes[1].set_ylabel("P Gain")
+                axes[1].grid(True)
+                axes[1].legend()
+
+                # Plot D gains
+                for i in range(d_gains_array.shape[1]):
+                    axes[2].plot(d_gains_array[:, i], label=f"Actuator {i}")
+                axes[2].set_title("D Gains Over Time")
+                axes[2].set_ylabel("D Gain")
+                axes[2].set_xlabel("Control Steps")
+                axes[2].grid(True)
+                axes[2].legend()
+
+            plt.tight_layout()
+            plt.savefig("recordings/cost_gain_history.png")
+            plt.show()
+            print("Cost and gain history plotted and saved to 'cost_gain_history.png'")
+        except ImportError:
+            print(
+                "Matplotlib not available for plotting. Install with 'pip install matplotlib'"
+            )
 
     # Save the video if recording was enabled
     if record_video and frames:

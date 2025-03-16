@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Sequence
+from typing import Dict, Sequence, Tuple
 
 import jax
 import jax.numpy as jnp
@@ -25,6 +25,7 @@ class Task(ABC):
         planning_horizon: int,
         sim_steps_per_control_step: int,
         trace_sites: Sequence[str] = [],
+        optimize_gains: bool = False,
     ):
         """Set the model and simulation parameters.
 
@@ -34,6 +35,7 @@ class Task(ABC):
             sim_steps_per_control_step: The number of simulation steps to take
                                         for each control step.
             trace_sites: A list of site names to visualize with traces.
+            optimize_gains: Whether to optimize the actuator gains along with controls.
 
         Note: many other simulator parameters, e.g., simulator time step,
               Newton iterations, etc., are set in the model itself.
@@ -43,6 +45,7 @@ class Task(ABC):
         self.model = mjx.put_model(mj_model)
         self.planning_horizon = planning_horizon
         self.sim_steps_per_control_step = sim_steps_per_control_step
+        self.optimize_gains = optimize_gains
 
         # Set actuator limits
         self.u_min = jnp.where(
@@ -55,6 +58,26 @@ class Task(ABC):
             mj_model.actuator_ctrlrange[:, 1],
             jnp.inf,
         )
+
+        # Add gain limits if optimizing gains
+        if optimize_gains:
+            # Original control dimensions
+            self.nu_ctrl = mj_model.nu
+            # Total control dimensions including gains (nu + 2*nu)
+            self.nu_total = mj_model.nu * 3
+
+            # Default gain limits - can be overridden by subclasses  kp="10" kv="2"
+            self.p_gain_min = jnp.ones(mj_model.nu) * 8
+            self.p_gain_max = jnp.ones(mj_model.nu) * 12.0
+            self.d_gain_min = jnp.ones(mj_model.nu) * 0
+            self.d_gain_max = jnp.ones(mj_model.nu) * 4.0
+
+            # Extend control limits to include gains
+            self.u_min = jnp.concatenate([self.u_min, self.p_gain_min, self.d_gain_min])
+            self.u_max = jnp.concatenate([self.u_max, self.p_gain_max, self.d_gain_max])
+        else:
+            self.nu_ctrl = mj_model.nu
+            self.nu_total = mj_model.nu
 
         # Timestep for each control step
         self.dt = mj_model.opt.timestep * sim_steps_per_control_step
@@ -140,3 +163,22 @@ class Task(ABC):
             A dictionary of randomized data elements.
         """
         return {}
+
+    def extract_gains(
+        self, control: jax.Array
+    ) -> Tuple[jax.Array, jax.Array, jax.Array]:
+        """Extract control and gain components from the extended control vector.
+
+        Args:
+            control: The extended control vector [u, p_gains, d_gains]
+
+        Returns:
+            Tuple of (control_actions, p_gains, d_gains)
+        """
+        if self.optimize_gains:
+            u = control[: self.nu_ctrl]
+            p_gains = control[self.nu_ctrl : 2 * self.nu_ctrl]
+            d_gains = control[2 * self.nu_ctrl : 3 * self.nu_ctrl]
+            return u, p_gains, d_gains
+        else:
+            return control, None, None

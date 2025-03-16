@@ -13,15 +13,14 @@ Run an interactive simulation of the particle tracking task.
 Double click on the green target, then drag it around with [ctrl + right-click].
 """
 
-# Define the task (cost and dynamics)
-task = Particle()
-
-# Print control dimensions
-print(f"Control dimensions: {task.model.nu}")
-
 # Parse command-line arguments
 parser = argparse.ArgumentParser(
     description="Run an interactive simulation of the particle tracking task."
+)
+parser.add_argument(
+    "--optimize-gains",
+    action="store_true",
+    help="Optimize actuator gains along with control inputs",
 )
 subparsers = parser.add_subparsers(
     dest="algorithm", help="Sampling algorithm (choose one)"
@@ -35,7 +34,19 @@ subparsers.add_parser(
 subparsers.add_parser("de", help="Differential Evolution")
 subparsers.add_parser("gld", help="Gradient-Less Descent")
 subparsers.add_parser("rs", help="Uniform Random Search")
+subparsers.add_parser("diffusion", help="Diffusion")
 args = parser.parse_args()
+
+# Define the task (cost and dynamics)
+task = Particle(optimize_gains=args.optimize_gains)
+
+# Print control dimensions
+if args.optimize_gains:
+    print(
+        f"Control dimensions: {task.nu_ctrl} (controls) + {2 * task.nu_ctrl} (gains) = {task.nu_total}"
+    )
+else:
+    print(f"Control dimensions: {task.model.nu}")
 
 # Set the controller based on command-line arguments
 if args.algorithm == "ps" or args.algorithm is None:
@@ -66,6 +77,10 @@ elif args.algorithm == "gld":
     print("Running Gradient-Less Descent (GLD)")
     ctrl = Evosax(task, evosax.GLD, num_samples=16)
 
+elif args.algorithm == "diffusion":
+    print("Running Diffusion")
+    ctrl = Evosax(task, evosax.DiffusionEvolution, num_samples=1000)
+
 elif args.algorithm == "rs":
     print("Running uniform random search")
     es_params = evosax.strategies.random.EvoParams(
@@ -89,4 +104,6 @@ run_interactive(
     show_traces=True,
     max_traces=5,
     record_video=False,
+    plot_costs=True,
+    show_cost_overlay=True,
 )

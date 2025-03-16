@@ -64,7 +64,7 @@ class Evosax(SamplingBasedController):
 
         self.strategy = optimizer(
             popsize=num_samples,
-            num_dims=task.model.nu * task.planning_horizon,
+            num_dims=task.nu_total * task.planning_horizon,
             **kwargs,
         )
 
@@ -76,7 +76,7 @@ class Evosax(SamplingBasedController):
         """Initialize the policy parameters."""
         rng = jax.random.key(seed)
         rng, init_rng = jax.random.split(rng)
-        controls = jnp.zeros((self.task.planning_horizon, self.task.model.nu))
+        controls = jnp.zeros((self.task.planning_horizon, self.task.nu_total))
         opt_state = self.strategy.initialize(init_rng, self.es_params)
         return EvosaxParams(controls=controls, opt_state=opt_state, rng=rng)
 
@@ -92,7 +92,7 @@ class Evosax(SamplingBasedController):
             (
                 self.strategy.popsize,
                 self.task.planning_horizon,
-                self.task.model.nu,
+                self.task.nu_total,
             ),
         )
 
@@ -119,6 +119,6 @@ class Evosax(SamplingBasedController):
 
     def get_action(self, params: EvosaxParams, t: float) -> jax.Array:
         """Get the control action for the current time step, zero order hold."""
-        idx_float = t / self.task.dt  # zero order hold
+        idx_float = (t + self.task.dt) / self.task.dt  # zero order hold
         idx = jnp.floor(idx_float).astype(jnp.int32)
-        return params.controls[idx]
+        return params.controls[0]

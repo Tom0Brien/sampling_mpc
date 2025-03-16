@@ -7,6 +7,7 @@ requires-python = ">=3.10"
 dependencies = [
     "evosax",
     "jax[cuda12]>=0.5.2",
+    "matplotlib>=3.10.1",
     "mujoco>=3.3.0",
     "mujoco-mjx>=3.3.0",
 ]

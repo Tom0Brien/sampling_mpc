@@ -548,6 +548,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "evosax" },
     { name = "jax", extra = ["cuda12"] },
+    { name = "matplotlib" },
     { name = "mujoco" },
     { name = "mujoco-mjx" },
 ]
@@ -561,6 +562,7 @@ dev = [
 requires-dist = [
     { name = "evosax", git = "https://github.com/RobertTLange/evosax?rev=04f9ad4680900a7a56becb39dcccf1ead3389669" },
     { name = "jax", extras = ["cuda12"], specifier = ">=0.5.2" },
+    { name = "matplotlib", specifier = ">=3.10.1" },
     { name = "mujoco", specifier = ">=3.3.0" },
     { name = "mujoco-mjx", specifier = ">=3.3.0" },
 ]

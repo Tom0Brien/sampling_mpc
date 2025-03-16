@@ -12,7 +12,12 @@ from mppii.task_base import Task
 class Particle(Task):
     """A velocity-controlled planar point mass chases a target position."""
 
-    def __init__(self, planning_horizon: int = 5, sim_steps_per_control_step: int = 5):
+    def __init__(
+        self,
+        planning_horizon: int = 5,
+        sim_steps_per_control_step: int = 1,
+        optimize_gains: bool = False,
+    ):
         """Load the MuJoCo model and set task parameters."""
         mj_model = mujoco.MjModel.from_xml_path(ROOT + "/models/particle/scene.xml")
 
@@ -21,6 +26,7 @@ class Particle(Task):
             planning_horizon=planning_horizon,
             sim_steps_per_control_step=sim_steps_per_control_step,
             trace_sites=["particle"],
+            optimize_gains=optimize_gains,
         )
 
         self.particle_id = mj_model.site("particle").id
@@ -29,7 +35,7 @@ class Particle(Task):
         """The running cost ℓ(xₜ, uₜ) encourages target tracking."""
         state_cost = self.terminal_cost(state)
         control_cost = jnp.sum(jnp.square(control))
-        return state_cost + 0.1 * control_cost
+        return state_cost  # + 0.1 * control_cost
 
     def terminal_cost(self, state: mjx.Data) -> jax.Array:
         """The terminal cost ϕ(x_T)."""
@@ -37,7 +43,7 @@ class Particle(Task):
             jnp.square(state.site_xpos[self.particle_id] - state.mocap_pos[0])
         )
         velocity_cost = jnp.sum(jnp.square(state.qvel))
-        return 5.0 * position_cost + 0.1 * velocity_cost
+        return 1e2 * position_cost  # + 0.01 * velocity_cost
 
     def domain_randomize_model(self, rng: jax.Array) -> Dict[str, jax.Array]:
         """Randomly perturb the actuator gains."""
