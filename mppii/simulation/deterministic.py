@@ -247,27 +247,30 @@ def run_interactive(
                 # Visualize reference position if debug info is enabled
                 if show_debug_info:
                     # Visualize reference position
-                    geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
-                    # If the controller.task.nu is 2 (2D control), then we only show 2d else assume 3D control TODO: Maybe a more elegant way to do this
-                    R = mj_data.site_xmat[controller.task.reference_id].reshape(3, 3)
-                    if controller.task.nu_ctrl == 2:
-                        reference_pos = mj_data.site_xpos[
-                            controller.task.reference_id
-                        ] + R.T @ np.array([u[0], u[1], 0.0])
-                    else:
-                        reference_pos = mj_data.site_xpos[
-                            controller.task.reference_id
-                        ] + R.T @ np.array([u[0], u[1], u[2]])
+                    if hasattr(controller.task, "reference_id"):
+                        geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
+                        # If the controller.task.nu is 2 (2D control), then we only show 2d else assume 3D control TODO: Maybe a more elegant way to do this
+                        R = mj_data.site_xmat[controller.task.reference_id].reshape(
+                            3, 3
+                        )
+                        if controller.task.nu_ctrl == 2:
+                            reference_pos = mj_data.site_xpos[
+                                controller.task.reference_id
+                            ] + R.T @ np.array([u[0], u[1], 0.0])
+                        else:
+                            reference_pos = mj_data.site_xpos[
+                                controller.task.reference_id
+                            ] + R.T @ np.array([u[0], u[1], u[2]])
 
-                    mujoco.mjv_initGeom(
-                        geom,
-                        type=mujoco.mjtGeom.mjGEOM_SPHERE,
-                        size=[0.01, 0, 0],  # Size of the sphere
-                        pos=reference_pos,  # Position of the reference
-                        mat=np.eye(3).flatten(),
-                        rgba=[1.0, 0.0, 0.0, 0.1],  # Red color
-                    )
-                    viewer.user_scn.ngeom += 1
+                        mujoco.mjv_initGeom(
+                            geom,
+                            type=mujoco.mjtGeom.mjGEOM_SPHERE,
+                            size=[0.01, 0, 0],  # Size of the sphere
+                            pos=reference_pos,  # Position of the reference
+                            mat=np.eye(3).flatten(),
+                            rgba=[1.0, 0.0, 0.0, 0.1],  # Red color
+                        )
+                        viewer.user_scn.ngeom += 1
 
                     # Add cost text
                     geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
