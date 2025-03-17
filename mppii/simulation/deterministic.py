@@ -31,7 +31,7 @@ def run_interactive(
     record_video: bool = False,
     video_path: str = None,
     plot_costs: bool = False,
-    show_cost_overlay: bool = True,
+    show_debug_info: bool = True,
 ) -> None:
     """Run an interactive simulation with the MPC controller.
 
@@ -55,6 +55,8 @@ def run_interactive(
         max_traces: The maximum number of traces to show at once.
         trace_width: The width of the trace lines (in pixels).
         trace_color: The RGBA color of the trace lines.
+        show_debug_info: Whether to show debug information like costs, gains,
+                         and reference positions.
     """
     # Report the planning horizon in seconds for debugging
     print(
@@ -96,7 +98,7 @@ def run_interactive(
     cam.lookat = [0.5, 0.0, 0.5]
     mujoco.mjv_defaultCamera(cam)
     if record_video:
-        renderer = mujoco.Renderer(mj_model, height=1080, width=1920)
+        renderer = mujoco.Renderer(mj_model, height=480, width=640)
         # Print in green recording video
         print("\033[92mRecording video...\033[0m")
 
@@ -150,7 +152,6 @@ def run_interactive(
 
             # Record cost history
             total_cost = float(jnp.sum(rollouts.costs[0]))
-            cost_history.append(total_cost)
 
             # Visualize the rollouts
             if show_traces:
@@ -168,105 +169,120 @@ def run_interactive(
                             ii += 1
                             viewer.user_scn.ngeom += 1
 
-            # Add cost and gain text overlays
-            if show_cost_overlay:
-                # Position for cost text - above the scene
-                cost_pos = np.array([0.0, 0.0, 0.5])
-
-                # Add cost text
-                geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
-                mujoco.mjv_initGeom(
-                    geom,
-                    type=mujoco.mjtGeom.mjGEOM_LABEL,
-                    size=np.array([0.2, 0.2, 0.2]),
-                    pos=cost_pos,
-                    mat=np.eye(3).flatten(),
-                    rgba=np.array([1, 1, 1, 1]),  # white text
-                )
-                geom.label = f"Cost: {total_cost:.4f}"
-                viewer.user_scn.ngeom += 1
-
-                # Add gain information if optimizing gains
-                if controller.task.optimize_gains:
-                    # Extract current gains for display
-                    _, current_p_gains, current_d_gains = controller.task.extract_gains(
-                        controller.get_action(policy_params, 0)
-                    )
-
-                    # Record gain history
-                    p_gain_history.append(np.array(current_p_gains))
-                    d_gain_history.append(np.array(current_d_gains))
-
-                    # Format gain text
-                    p_gain_text = (
-                        "P-gains: ["
-                        + ", ".join([f"{g:.2f}" for g in current_p_gains])
-                        + "]"
-                    )
-                    d_gain_text = (
-                        "D-gains: ["
-                        + ", ".join([f"{g:.2f}" for g in current_d_gains])
-                        + "]"
-                    )
-
-                    # Add P-gain text (positioned below cost text)
-                    geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
-                    mujoco.mjv_initGeom(
-                        geom,
-                        type=mujoco.mjtGeom.mjGEOM_LABEL,
-                        size=np.array([0.15, 0.15, 0.15]),
-                        pos=cost_pos
-                        - np.array([0.0, 0.0, 0.05]),  # position below cost
-                        mat=np.eye(3).flatten(),
-                        rgba=np.array([0.8, 0.8, 1.0, 1]),  # light blue text
-                    )
-                    geom.label = p_gain_text
-                    viewer.user_scn.ngeom += 1
-
-                    # Add D-gain text (positioned below P-gain text)
-                    geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
-                    mujoco.mjv_initGeom(
-                        geom,
-                        type=mujoco.mjtGeom.mjGEOM_LABEL,
-                        size=np.array([0.15, 0.15, 0.15]),
-                        pos=cost_pos
-                        - np.array([0.0, 0.0, 0.1]),  # position below P-gain
-                        mat=np.eye(3).flatten(),
-                        rgba=np.array([0.8, 1.0, 0.8, 1]),  # light green text
-                    )
-                    geom.label = d_gain_text
-                    viewer.user_scn.ngeom += 1
+            # Position for cost text - above the scene
+            cost_pos = np.array([0.0, 0.0, 0.5])
 
             # Step the simulation
             for i in range(sim_steps_per_replan):
                 t = i * mj_model.opt.timestep
                 u = controller.get_action(policy_params, t)
+                cost_history.append(total_cost)
 
+                # Centralized handling of control and gain information
                 if controller.task.optimize_gains:
                     # Extract control and gains
                     ctrl, p_gains, d_gains = controller.task.extract_gains(u)
+
                     # Update the actuator gain parameters in the model
                     for j in range(controller.task.nu_ctrl):
                         mj_model.actuator_gainprm[j, 1] = p_gains[j]
                         mj_model.actuator_gainprm[j, 2] = d_gains[j]
+
+                    # Apply control
                     mj_data.ctrl[: controller.task.nu_ctrl] = np.array(ctrl)
+
+                    # Store history
                     control_history.append(np.array(ctrl))
+                    p_gain_history.append(np.array(p_gains))
+                    d_gain_history.append(np.array(d_gains))
+
+                    # Show debug information if enabled
+                    if show_debug_info:
+                        # Format gain text
+                        p_gain_text = (
+                            "P-gains: ["
+                            + ", ".join([f"{g:.2f}" for g in p_gains])
+                            + "]"
+                        )
+                        d_gain_text = (
+                            "D-gains: ["
+                            + ", ".join([f"{g:.2f}" for g in d_gains])
+                            + "]"
+                        )
+
+                        # Add P-gain text (positioned below cost text)
+                        geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
+                        mujoco.mjv_initGeom(
+                            geom,
+                            type=mujoco.mjtGeom.mjGEOM_LABEL,
+                            size=np.array([0.15, 0.15, 0.15]),
+                            pos=cost_pos
+                            - np.array([0.0, 0.0, 0.05]),  # position below cost
+                            mat=np.eye(3).flatten(),
+                            rgba=np.array([0.8, 0.8, 1.0, 1]),  # light blue text
+                        )
+                        geom.label = p_gain_text
+                        viewer.user_scn.ngeom += 1
+
+                        # Add D-gain text (positioned below P-gain text)
+                        geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
+                        mujoco.mjv_initGeom(
+                            geom,
+                            type=mujoco.mjtGeom.mjGEOM_LABEL,
+                            size=np.array([0.15, 0.15, 0.15]),
+                            pos=cost_pos
+                            - np.array([0.0, 0.0, 0.1]),  # position below P-gain
+                            mat=np.eye(3).flatten(),
+                            rgba=np.array([0.8, 1.0, 0.8, 1]),  # light green text
+                        )
+                        geom.label = d_gain_text
+                        viewer.user_scn.ngeom += 1
                 else:
+                    # Apply control directly
                     mj_data.ctrl[:] = np.array(u)
+
+                    # Store history
                     control_history.append(np.array(u))
 
-                # Extract the first two elements of u as the reference position
-                geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
-                mujoco.mjv_initGeom(
-                    geom,
-                    type=mujoco.mjtGeom.mjGEOM_SPHERE,
-                    size=[0.01, 0, 0],  # Size of the sphere
-                    pos=[u[0], u[1], 0.01],  # Position of the sphere
-                    mat=np.eye(3).flatten(),
-                    rgba=[1.0, 0.0, 0.0, 0.1],  # Red color, explicitly float32
-                )
-                viewer.user_scn.ngeom += 1
+                # Visualize reference position if debug info is enabled
+                if show_debug_info:
+                    # Visualize reference position
+                    geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
+                    # If the controller.task.nu is 2 (2D control), then we only show 2d else assume 3D control TODO: Maybe a more elegant way to do this
+                    R = mj_data.site_xmat[controller.task.reference_id].reshape(3, 3)
+                    if controller.task.nu_ctrl == 2:
+                        reference_pos = mj_data.site_xpos[
+                            controller.task.reference_id
+                        ] + R.T @ np.array([u[0], u[1], 0.0])
+                    else:
+                        reference_pos = mj_data.site_xpos[
+                            controller.task.reference_id
+                        ] + R.T @ np.array([u[0], u[1], u[2]])
 
+                    mujoco.mjv_initGeom(
+                        geom,
+                        type=mujoco.mjtGeom.mjGEOM_SPHERE,
+                        size=[0.01, 0, 0],  # Size of the sphere
+                        pos=reference_pos,  # Position of the reference
+                        mat=np.eye(3).flatten(),
+                        rgba=[1.0, 0.0, 0.0, 0.1],  # Red color
+                    )
+                    viewer.user_scn.ngeom += 1
+
+                    # Add cost text
+                    geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
+                    mujoco.mjv_initGeom(
+                        geom,
+                        type=mujoco.mjtGeom.mjGEOM_LABEL,
+                        size=np.array([0.2, 0.2, 0.2]),
+                        pos=cost_pos,
+                        mat=np.eye(3).flatten(),
+                        rgba=np.array([1, 1, 1, 1]),  # white text
+                    )
+                    geom.label = f"Cost: {total_cost:.4f}"
+                    viewer.user_scn.ngeom += 1
+
+                # Step the simulation
                 mujoco.mj_step(mj_model, mj_data)
                 viewer.sync()
 
