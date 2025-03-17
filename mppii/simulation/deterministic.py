@@ -104,6 +104,7 @@ def run_interactive(
     cost_history = []
     p_gain_history = []
     d_gain_history = []
+    control_history = []
 
     # Start the simulation
     with mujoco.viewer.launch_passive(mj_model, mj_data) as viewer:
@@ -240,16 +241,32 @@ def run_interactive(
             for i in range(sim_steps_per_replan):
                 t = i * mj_model.opt.timestep
                 u = controller.get_action(policy_params, t)
+
                 if controller.task.optimize_gains:
                     # Extract control and gains
                     ctrl, p_gains, d_gains = controller.task.extract_gains(u)
                     # Update the actuator gain parameters in the model
                     for j in range(controller.task.nu_ctrl):
-                        mj_model.actuator_gainprm[j, 0] = p_gains[j]
-                        mj_model.actuator_gainprm[j, 1] = d_gains[j]
+                        mj_model.actuator_gainprm[j, 1] = p_gains[j]
+                        mj_model.actuator_gainprm[j, 2] = d_gains[j]
                     mj_data.ctrl[: controller.task.nu_ctrl] = np.array(ctrl)
+                    control_history.append(np.array(ctrl))
                 else:
                     mj_data.ctrl[:] = np.array(u)
+                    control_history.append(np.array(u))
+
+                # Extract the first two elements of u as the reference position
+                geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
+                mujoco.mjv_initGeom(
+                    geom,
+                    type=mujoco.mjtGeom.mjGEOM_SPHERE,
+                    size=[0.01, 0, 0],  # Size of the sphere
+                    pos=[u[0], u[1], 0.01],  # Position of the sphere
+                    mat=np.eye(3).flatten(),
+                    rgba=[1.0, 0.0, 0.0, 0.1],  # Red color, explicitly float32
+                )
+                viewer.user_scn.ngeom += 1
+
                 mujoco.mj_step(mj_model, mj_data)
                 viewer.sync()
 
@@ -277,15 +294,15 @@ def run_interactive(
         try:
             # Create figure with multiple subplots
             fig, axes = plt.subplots(
-                1 + (2 if controller.task.optimize_gains else 0),
+                1 + (2 if controller.task.optimize_gains else 0) + 1,
                 1,
-                figsize=(10, 8),
+                figsize=(10, 10),
                 sharex=True,
             )
 
             # If not optimizing gains, axes is not a list, so make it one for consistency
             if not controller.task.optimize_gains:
-                axes = [axes]
+                axes = [axes] if not isinstance(axes, np.ndarray) else axes
 
             # Plot cost history
             axes[0].plot(cost_history)
@@ -312,14 +329,34 @@ def run_interactive(
                     axes[2].plot(d_gains_array[:, i], label=f"Actuator {i}")
                 axes[2].set_title("D Gains Over Time")
                 axes[2].set_ylabel("D Gain")
-                axes[2].set_xlabel("Control Steps")
                 axes[2].grid(True)
                 axes[2].legend()
+
+                # Plot control signals (last subplot)
+                control_plot_idx = 3
+            else:
+                # If not optimizing gains, control plot is the second subplot
+                control_plot_idx = 1
+
+            # Plot control history
+            if control_history:
+                control_array = np.array(control_history)
+                for i in range(control_array.shape[1]):
+                    axes[control_plot_idx].plot(
+                        control_array[:, i], label=f"Control {i}"
+                    )
+                axes[control_plot_idx].set_title("Control Signals Over Time")
+                axes[control_plot_idx].set_ylabel("Control Value")
+                axes[control_plot_idx].set_xlabel("Control Steps")
+                axes[control_plot_idx].grid(True)
+                axes[control_plot_idx].legend()
 
             plt.tight_layout()
             plt.savefig("recordings/cost_gain_history.png")
             plt.show()
-            print("Cost and gain history plotted and saved to 'cost_gain_history.png'")
+            print(
+                "Cost, gain, and control history plotted and saved to 'cost_gain_history.png'"
+            )
         except ImportError:
             print(
                 "Matplotlib not available for plotting. Install with 'pip install matplotlib'"

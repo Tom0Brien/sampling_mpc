@@ -170,9 +170,9 @@ class SamplingBasedController(ABC):
                 updated_model = model
                 for i in range(self.task.nu_ctrl):
                     updated_model = updated_model.replace(
-                        actuator_gainprm=updated_model.actuator_gainprm.at[i, 0]
+                        actuator_gainprm=updated_model.actuator_gainprm.at[i, 1]
                         .set(p_gains[i])
-                        .at[i, 1]
+                        .at[i, 2]
                         .set(d_gains[i])
                     )
 
