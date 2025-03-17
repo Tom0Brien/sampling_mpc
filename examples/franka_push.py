@@ -112,4 +112,5 @@ run_interactive(
     trace_width=6,
     trace_color=[0.0, 0.0, 1.0, 0.5],
     record_video=False,
+    show_debug_info=True,
 )

@@ -14,8 +14,8 @@ class PushBox(Task):
 
     def __init__(
         self,
-        planning_horizon: int = 10,
-        sim_steps_per_control_step: int = 10,
+        planning_horizon: int = 20,
+        sim_steps_per_control_step: int = 5,
         optimize_gains: bool = False,
     ):
         """Load the MuJoCo model and set task parameters."""
@@ -52,7 +52,7 @@ class PushBox(Task):
     def _close_to_block_err(self, state: mjx.Data) -> jax.Array:
         """Position of the pusher block relative to the block."""
         block_pos = state.qpos[:2]
-        pusher_pos = state.qpos[5:6] + jnp.array([0.0, 0.02])  # y bias
+        pusher_pos = state.qpos[5:6]  # + jnp.array([0.0, 0.02])  # y bias
         return block_pos - pusher_pos
 
     def running_cost(self, state: mjx.Data, control: jax.Array) -> jax.Array:
@@ -65,7 +65,7 @@ class PushBox(Task):
         orientation_cost = jnp.sum(jnp.square(orientation_err))
         close_to_block_cost = jnp.sum(jnp.square(close_to_block_err))
 
-        return position_cost + orientation_cost + 0.1 * close_to_block_cost
+        return 1e2 * position_cost + orientation_cost + close_to_block_cost
 
     def terminal_cost(self, state: mjx.Data) -> jax.Array:
         """The terminal cost ℓ_T(x_T)."""

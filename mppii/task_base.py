@@ -67,10 +67,10 @@ class Task(ABC):
             self.nu_total = mj_model.nu * 3
 
             # Default gain limits - can be overridden by subclasses  kp="10" kv="2"
-            self.p_gain_min = jnp.ones(mj_model.nu) * 8
-            self.p_gain_max = jnp.ones(mj_model.nu) * 12.0
-            self.d_gain_min = jnp.ones(mj_model.nu) * 0
-            self.d_gain_max = jnp.ones(mj_model.nu) * 4.0
+            self.p_gain_min = jnp.ones(mj_model.nu) * 5
+            self.p_gain_max = jnp.ones(mj_model.nu) * 30.0
+            self.d_gain_min = jnp.ones(mj_model.nu) * 1
+            self.d_gain_max = jnp.ones(mj_model.nu) * 10
 
             # Extend control limits to include gains
             self.u_min = jnp.concatenate([self.u_min, self.p_gain_min, self.d_gain_min])

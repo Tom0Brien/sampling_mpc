@@ -14,7 +14,10 @@ class FrankaReach(Task):
     """Franka to reach a target position."""
 
     def __init__(
-        self, planning_horizon: int = 20, sim_steps_per_control_step: int = 20
+        self,
+        planning_horizon: int = 5,
+        sim_steps_per_control_step: int = 5,
+        optimize_gains: bool = False,
     ):
         """Load the MuJoCo model and set task parameters."""
         mj_model = mujoco.MjModel.from_xml_path(
@@ -26,16 +29,36 @@ class FrankaReach(Task):
             planning_horizon=planning_horizon,
             sim_steps_per_control_step=sim_steps_per_control_step,
             trace_sites=["gripper"],
+            optimize_gains=optimize_gains,
         )
 
         self.gripper_id = mj_model.site("gripper").id
         self.reference_id = mj_model.site("reference").id
 
+        # Set actuator limits
+        self.u_min = jnp.where(
+            mj_model.actuator_ctrllimited,
+            mj_model.actuator_ctrlrange[:, 0],
+            -jnp.inf,
+        )
+        self.u_max = jnp.where(
+            mj_model.actuator_ctrllimited,
+            mj_model.actuator_ctrlrange[:, 1],
+            jnp.inf,
+        )
+        if optimize_gains:
+            self.p_gain_min = jnp.ones(mj_model.nu) * 15
+            self.p_gain_max = jnp.ones(mj_model.nu) * 30.0
+            self.d_gain_min = jnp.ones(mj_model.nu) * 5
+            self.d_gain_max = jnp.ones(mj_model.nu) * 20
+            self.u_min = jnp.concatenate([self.u_min, self.p_gain_min, self.d_gain_min])
+            self.u_max = jnp.concatenate([self.u_max, self.p_gain_max, self.d_gain_max])
+
     def running_cost(self, state: mjx.Data, control: jax.Array) -> jax.Array:
         """The running cost ℓ(xₜ, uₜ) encourages target tracking."""
         state_cost = self.terminal_cost(state)
         control_cost = jnp.sum(jnp.square(control))
-        return state_cost + 0.1 * control_cost
+        return state_cost  # + 0.1 * control_cost
 
     def terminal_cost(self, state: mjx.Data) -> jax.Array:
         """The terminal cost ϕ(x_T)."""

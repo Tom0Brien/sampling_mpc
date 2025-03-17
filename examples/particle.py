@@ -2,6 +2,7 @@ import argparse
 
 import evosax
 import mujoco
+import numpy as np
 
 from mppii.algs import MPPI, Evosax, PredictiveSampling
 from mppii.simulation.deterministic import run_interactive
@@ -53,13 +54,21 @@ if args.algorithm == "ps" or args.algorithm is None:
     print("Running predictive sampling")
     ctrl = PredictiveSampling(
         task,
-        num_samples=16,
-        noise_level=0.1,
+        num_samples=2000,
+        noise_level=0.001,
     )
 
 elif args.algorithm == "mppi":
     print("Running MPPI")
-    ctrl = MPPI(task, num_samples=16, noise_level=0.3, temperature=0.01)
+    if task.optimize_gains:
+        ctrl = MPPI(
+            task,
+            num_samples=2000,
+            noise_level=np.array([0.05, 0.05, 0.5, 0.5, 0.5, 0.5]),
+            temperature=0.001,
+        )
+    else:
+        ctrl = MPPI(task, num_samples=2000, noise_level=0.05, temperature=0.001)
 
 elif args.algorithm == "cmaes":
     print("Running CMA-ES")
@@ -105,5 +114,5 @@ run_interactive(
     max_traces=5,
     record_video=False,
     plot_costs=True,
-    show_cost_overlay=True,
+    show_debug_info=False,
 )

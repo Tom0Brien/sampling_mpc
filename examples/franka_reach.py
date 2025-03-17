@@ -2,6 +2,7 @@ import argparse
 
 import evosax
 import mujoco
+import numpy as np
 
 from mppii.algs import MPPI, Evosax, PredictiveSampling
 from mppii.simulation.deterministic import run_interactive
@@ -13,15 +14,15 @@ Run an interactive simulation of the particle tracking task.
 Double click on the green target, then drag it around with [ctrl + right-click].
 """
 
-# Define the task (cost and dynamics)
-task = FrankaReach()
-
-# Print control dimensions
-print(f"Control dimensions: {task.model.nu}")
 
 # Parse command-line arguments
 parser = argparse.ArgumentParser(
     description="Run an interactive simulation of the particle tracking task."
+)
+parser.add_argument(
+    "--optimize-gains",
+    action="store_true",
+    help="Optimize actuator gains along with control inputs",
 )
 subparsers = parser.add_subparsers(
     dest="algorithm", help="Sampling algorithm (choose one)"
@@ -38,6 +39,12 @@ subparsers.add_parser("rs", help="Uniform Random Search")
 subparsers.add_parser("diffusion", help="Diffusion Evolution")
 args = parser.parse_args()
 
+# Define the task (cost and dynamics)
+task = FrankaReach(optimize_gains=args.optimize_gains)
+
+# Print control dimensions
+print(f"Control dimensions: {task.model.nu}")
+
 # Set the controller based on command-line arguments
 if args.algorithm == "ps" or args.algorithm is None:
     print("Running predictive sampling")
@@ -49,7 +56,36 @@ if args.algorithm == "ps" or args.algorithm is None:
 
 elif args.algorithm == "mppi":
     print("Running MPPI")
-    ctrl = MPPI(task, num_samples=128, noise_level=0.05, temperature=0.1)
+    if task.optimize_gains:
+        ctrl = MPPI(
+            task,
+            num_samples=2000,
+            noise_level=np.array(
+                [
+                    0.05,  # x reference noise level
+                    0.05,  # y reference noise level
+                    0.05,  # z reference noise level
+                    0.05,  # roll reference noise level
+                    0.05,  # pitch reference noise level
+                    0.05,  # yaw reference noise level
+                    1,  # kp x noise level
+                    1,  # kp y noise level
+                    1,  # kp z noise level
+                    1,  # kp roll noise level
+                    1,  # kp pitch noise level
+                    1,  # kp yaw noise level
+                    1,  # kd x noise level
+                    1,  # kd y noise level
+                    1,  # kd z noise level
+                    1,  # kd roll noise level
+                    1,  # kd pitch noise level
+                    1,  # kd yaw noise level
+                ]
+            ),
+            temperature=0.001,
+        )
+    else:
+        ctrl = MPPI(task, num_samples=2000, noise_level=0.05, temperature=0.001)
 
 elif args.algorithm == "cmaes":
     print("Running CMA-ES")
@@ -98,4 +134,6 @@ run_interactive(
     frequency=10,
     show_traces=True,
     max_traces=5,
+    show_debug_info=True,
+    record_video=True,
 )

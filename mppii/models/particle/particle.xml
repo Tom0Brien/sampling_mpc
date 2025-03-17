@@ -7,7 +7,7 @@
   </option>
 
   <default>
-    <joint type="hinge" axis="0 0 1" limited="true" range="-.29 .29" damping="1" />
+    <joint type="hinge" axis="0 0 1" limited="true" range="-.29 .29" damping="0" />
     <motor gear=".1" ctrlrange="-1 1" ctrllimited="true" />
     <default class="translation">
       <position kp="5" kv="3" ctrlrange="-0.3 0.3"/>
@@ -15,7 +15,7 @@
   </default>
 
   <worldbody>
-    <site name="reference" pos="0 0 0" size="0.01" rgba="1 0 0 0.5"/>
+    <site name="reference" pos="0 0 0.01" size="0.01" rgba="0 0 0 0.0"/>
     
     <body name="goal" mocap="true" pos="0.25 0 0.01" quat="1 0 0 0">
       <geom type="sphere" size=".01" contype="0" conaffinity="0" rgba="0 1 0 .5" />
