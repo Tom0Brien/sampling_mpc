@@ -2,6 +2,7 @@ import argparse
 
 import evosax
 import mujoco
+import numpy as np
 
 from mppii.algs import MPPI, Evosax, PredictiveSampling
 from mppii.simulation.deterministic import run_interactive
@@ -12,16 +13,14 @@ Run an interactive simulation of the box pushing task.
 
 Double click on the green target to move the goal position.
 """
-
-# Define the task (cost and dynamics)
-task = FrankaPush()
-
-# Print control dimensions
-print(f"Control dimensions: {task.model.nu}")
-
 # Parse command-line arguments
 parser = argparse.ArgumentParser(
     description="Run an interactive simulation of the particle tracking task."
+)
+parser.add_argument(
+    "--optimize-gains",
+    action="store_true",
+    help="Optimize actuator gains along with control inputs",
 )
 subparsers = parser.add_subparsers(
     dest="algorithm", help="Sampling algorithm (choose one)"
@@ -40,6 +39,13 @@ subparsers.add_parser("diffusion", help="Diffusion Evolution")
 
 args = parser.parse_args()
 
+# Define the task (cost and dynamics)
+task = FrankaPush(optimize_gains=args.optimize_gains)
+
+# Print control dimensions
+print(f"Control dimensions: {task.model.nu}")
+
+
 # Set the controller based on command-line arguments
 if args.algorithm == "ps" or args.algorithm is None:
     print("Running predictive sampling")
@@ -51,7 +57,36 @@ if args.algorithm == "ps" or args.algorithm is None:
 
 elif args.algorithm == "mppi":
     print("Running MPPI")
-    ctrl = MPPI(task, num_samples=1000, noise_level=0.1, temperature=0.05)
+    if args.optimize_gains:
+        ctrl = MPPI(
+            task,
+            num_samples=2000,
+            noise_level=np.array(
+                [
+                    0.01,  # x reference noise level
+                    0.01,  # y reference noise level
+                    0.01,  # z reference noise level
+                    0.01,  # roll reference noise level
+                    0.01,  # pitch reference noise level
+                    0.01,  # yaw reference noise level
+                    1,  # kp x noise level
+                    1,  # kp y noise level
+                    1,  # kp z noise level
+                    1,  # kp roll noise level
+                    1,  # kp pitch noise level
+                    1,  # kp yaw noise level
+                    1,  # kd x noise level
+                    1,  # kd y noise level
+                    1,  # kd z noise level
+                    1,  # kd roll noise level
+                    1,  # kd pitch noise level
+                    1,  # kd yaw noise level
+                ]
+            ),
+            temperature=0.001,
+        )
+    else:
+        ctrl = MPPI(task, num_samples=1000, noise_level=0.1, temperature=0.05)
 
 elif args.algorithm == "cmaes":
     print("Running CMA-ES")
@@ -98,9 +133,15 @@ else:
 # Define the model used for simulation
 mj_model = task.mj_model
 mj_data = mujoco.MjData(mj_model)
+
 # Set the initial joint positions
-# mj_data.qpos[:7] = [-0.199, -0.149, 0.179, -1.72, 0.028, 1.57, 0.763]
 mj_data.qpos[:7] = [-0.196, -0.189, 0.182, -2.1, 0.0378, 1.91, 0.756]
+
+# Initialize the controller gains
+for j in range(ctrl.task.nu_ctrl):
+    mj_model.actuator_gainprm[j, 1] = 50
+    mj_model.actuator_gainprm[j, 2] = 20
+
 # Run the interactive simulation
 run_interactive(
     ctrl,
@@ -113,4 +154,5 @@ run_interactive(
     trace_color=[0.0, 0.0, 1.0, 0.5],
     record_video=False,
     show_debug_info=True,
+    plot_costs=True,
 )
