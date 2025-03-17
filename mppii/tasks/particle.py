@@ -14,7 +14,7 @@ class Particle(Task):
 
     def __init__(
         self,
-        planning_horizon: int = 5,
+        planning_horizon: int = 10,
         sim_steps_per_control_step: int = 5,
         optimize_gains: bool = False,
     ):
@@ -30,11 +30,29 @@ class Particle(Task):
         )
 
         self.particle_id = mj_model.site("particle").id
+        self.reference_id = mj_model.site("reference").id
+        # Set actuator limits
+        self.u_min = jnp.where(
+            mj_model.actuator_ctrllimited,
+            mj_model.actuator_ctrlrange[:, 0],
+            -jnp.inf,
+        )
+        self.u_max = jnp.where(
+            mj_model.actuator_ctrllimited,
+            mj_model.actuator_ctrlrange[:, 1],
+            jnp.inf,
+        )
+        if optimize_gains:
+            self.p_gain_min = jnp.ones(mj_model.nu) * 1
+            self.p_gain_max = jnp.ones(mj_model.nu) * 50
+            self.d_gain_min = jnp.ones(mj_model.nu) * 1
+            self.d_gain_max = jnp.ones(mj_model.nu) * 50
+            self.u_min = jnp.concatenate([self.u_min, self.p_gain_min, self.d_gain_min])
+            self.u_max = jnp.concatenate([self.u_max, self.p_gain_max, self.d_gain_max])
 
     def running_cost(self, state: mjx.Data, control: jax.Array) -> jax.Array:
         """The running cost ℓ(xₜ, uₜ) encourages target tracking."""
         state_cost = self.terminal_cost(state)
-        control_cost = jnp.sum(jnp.square(control))
         return state_cost
 
     def terminal_cost(self, state: mjx.Data) -> jax.Array:
@@ -43,7 +61,7 @@ class Particle(Task):
             jnp.square(state.site_xpos[self.particle_id] - state.mocap_pos[0])
         )
         velocity_cost = jnp.sum(jnp.square(state.qvel))
-        return 1e1 * position_cost + 0.01 * velocity_cost
+        return 1e1 * position_cost  # + 0.01 * velocity_cost
 
     def domain_randomize_model(self, rng: jax.Array) -> Dict[str, jax.Array]:
         """Randomly perturb the actuator gains."""

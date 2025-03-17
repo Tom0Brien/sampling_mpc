@@ -63,8 +63,8 @@ elif args.algorithm == "mppi":
     if task.optimize_gains:
         ctrl = MPPI(
             task,
-            num_samples=2000,
-            noise_level=np.array([0.05, 0.05, 0.5, 0.5, 0.5, 0.5]),
+            num_samples=1000,
+            noise_level=np.array([0.1, 0.1, 1, 1, 1, 1]),
             temperature=0.001,
         )
     else:
@@ -114,5 +114,5 @@ run_interactive(
     max_traces=5,
     record_video=False,
     plot_costs=True,
-    show_debug_info=False,
+    show_debug_info=True,
 )
