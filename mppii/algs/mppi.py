@@ -35,7 +35,7 @@ class MPPI(SamplingBasedController):
         self,
         task: Task,
         num_samples: int,
-        noise_level: float,
+        noise_level: float | jax.Array,
         temperature: float,
         num_randomizations: int = 1,
         risk_strategy: RiskStrategy = None,
@@ -47,6 +47,8 @@ class MPPI(SamplingBasedController):
             task: The dynamics and cost for the system we want to control.
             num_samples: The number of control sequences to sample.
             noise_level: The scale of Gaussian noise to add to sampled controls.
+                         Can be a scalar (same noise for all dimensions) or
+                         a vector of shape (task.nu_total,) for dimension-specific noise.
             temperature: The temperature parameter λ. Higher values take a more
                          even average over the samples.
             num_randomizations: The number of domain randomizations to use.
@@ -55,7 +57,19 @@ class MPPI(SamplingBasedController):
             seed: The random seed for domain randomization.
         """
         super().__init__(task, num_randomizations, risk_strategy, seed)
-        self.noise_level = noise_level
+
+        # Convert scalar noise level to vector if needed
+        if isinstance(noise_level, (int, float)) or (
+            hasattr(noise_level, "shape") and noise_level.shape == ()
+        ):
+            self.noise_level = jnp.ones(task.nu_total) * noise_level
+        else:
+            # Ensure noise_level is the right shape
+            assert noise_level.shape == (task.nu_total,), (
+                f"noise_level must have shape ({task.nu_total},), got {noise_level.shape}"
+            )
+            self.noise_level = noise_level
+
         self.num_samples = num_samples
         self.temperature = temperature
 
@@ -76,7 +90,8 @@ class MPPI(SamplingBasedController):
                 self.task.nu_total,
             ),
         )
-        controls = params.mean + self.noise_level * noise
+        # Apply dimension-specific noise scaling
+        controls = params.mean + noise * self.noise_level[None, None, :]
         return controls, params.replace(rng=rng)
 
     def update_params(self, params: MPPIParams, rollouts: Trajectory) -> MPPIParams:
@@ -91,4 +106,5 @@ class MPPI(SamplingBasedController):
         """Get the control action for the current time step, zero order hold."""
         idx_float = t / self.task.dt  # zero order hold
         idx = jnp.floor(idx_float).astype(jnp.int32)
+        # print(f"idx: {idx}")
         return params.mean[idx]
