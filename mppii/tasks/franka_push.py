@@ -76,9 +76,17 @@ class FrankaPush(Task):
             box_quat, desired_box_orientation, box_rot
         )
 
-        # Desired gripper position
+        # Desired gripper position: 5cm back from box along box-to-goal line
+        # Calculate direction vector from box to goal
+        box_to_goal = desired_box_pos - current_box_pos
+        # Normalize the direction vector
+        distance = jnp.linalg.norm(box_to_goal)
+        direction = box_to_goal / jnp.maximum(distance, 1e-6)  # Avoid division by zero
+        # Calculate desired gripper position: 5cm back from box along this direction
+        desired_gripper_pos = current_box_pos - 0.05 * direction  # 5cm offset
+
         gripper_pos = state.site_xpos[self.gripper_id]
-        box_to_gripper_cost = jnp.sum(jnp.square(gripper_pos - current_box_pos))
+        box_to_gripper_cost = jnp.sum(jnp.square(gripper_pos - desired_gripper_pos))
 
         # Desired gripper orientation (roll and pitch, yaw should be able to vary)
         gripper_rot = state.site_xmat[self.gripper_id].reshape((3, 3))
@@ -90,6 +98,6 @@ class FrankaPush(Task):
         return (
             50.0 * box_pos_cost  # Box position
             + 0.0 * box_orientation_cost  # Box orientation
-            + 10.0 * box_to_gripper_cost  # Adaptive gripper-box coupling
+            + 50.0 * box_to_gripper_cost  # Close to box cost
             + 0 * gripper_orientation_cost  # Gripper orientation
         )
