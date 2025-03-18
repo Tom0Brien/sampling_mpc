@@ -10,7 +10,7 @@ from mppii.task_base import Task
 
 
 class ParticleCorridor(Task):
-    """A particle pushes a box through a narrow corridor without touching the walls."""
+    """A particle pushes a box out of an enclosed room through a door opening."""
 
     def __init__(
         self,
@@ -33,17 +33,28 @@ class ParticleCorridor(Task):
 
         self.particle_id = mj_model.site("particle").id
         self.reference_id = mj_model.site("reference").id
-        self.corridor_center_id = mj_model.site("corridor_center").id
+        self.door_center_id = mj_model.site("door_center").id
 
         # Sensor IDs for touch sensors
         self.box_position_sensor = mujoco.mj_name2id(
             mj_model, mujoco.mjtObj.mjOBJ_SENSOR, "box_position"
         )
-        self.left_wall_touch_sensor = mujoco.mj_name2id(
-            mj_model, mujoco.mjtObj.mjOBJ_SENSOR, "left_wall_touch"
+
+        # Wall touch sensors
+        self.left_wall_touch_top_sensor = mujoco.mj_name2id(
+            mj_model, mujoco.mjtObj.mjOBJ_SENSOR, "left_wall_touch_top"
+        )
+        self.left_wall_touch_bottom_sensor = mujoco.mj_name2id(
+            mj_model, mujoco.mjtObj.mjOBJ_SENSOR, "left_wall_touch_bottom"
         )
         self.right_wall_touch_sensor = mujoco.mj_name2id(
             mj_model, mujoco.mjtObj.mjOBJ_SENSOR, "right_wall_touch"
+        )
+        self.top_wall_touch_sensor = mujoco.mj_name2id(
+            mj_model, mujoco.mjtObj.mjOBJ_SENSOR, "top_wall_touch"
+        )
+        self.bottom_wall_touch_sensor = mujoco.mj_name2id(
+            mj_model, mujoco.mjtObj.mjOBJ_SENSOR, "bottom_wall_touch"
         )
 
         # Define parameters for wall collision detection
@@ -79,24 +90,42 @@ class ParticleCorridor(Task):
         sensor_dim = self.model.sensor_dim[sensor_id]
         return state.sensordata[sensor_adr : sensor_adr + sensor_dim]
 
-    def _wall_collision_cost(self, state: mjx.Data) -> jax.Array:
+    def _wall_collision(self, state: mjx.Data) -> jax.Array:
         """Calculate cost for box collision with walls using touch sensors.
 
         The touch sensor returns the normal force on the sensor site.
         A non-zero value indicates contact.
         """
-        # Get touch data from sensors
-        left_wall_touch = self._get_sensor_data(state, self.left_wall_touch_sensor)
+        # Get touch data from all wall sensors
+        left_wall_touch_top = self._get_sensor_data(
+            state, self.left_wall_touch_top_sensor
+        )
+        left_wall_touch_bottom = self._get_sensor_data(
+            state, self.left_wall_touch_bottom_sensor
+        )
         right_wall_touch = self._get_sensor_data(state, self.right_wall_touch_sensor)
+        top_wall_touch = self._get_sensor_data(state, self.top_wall_touch_sensor)
+        bottom_wall_touch = self._get_sensor_data(state, self.bottom_wall_touch_sensor)
 
         # Calculate magnitude of touch forces
-        left_touch_magnitude = jnp.sum(jnp.square(left_wall_touch))
+        left_top_touch_magnitude = jnp.sum(jnp.square(left_wall_touch_top))
+        left_bottom_touch_magnitude = jnp.sum(jnp.square(left_wall_touch_bottom))
         right_touch_magnitude = jnp.sum(jnp.square(right_wall_touch))
+        top_touch_magnitude = jnp.sum(jnp.square(top_wall_touch))
+        bottom_touch_magnitude = jnp.sum(jnp.square(bottom_wall_touch))
 
-        # Combine touch magnitudes with quadratic penalty
-        total_touch = left_touch_magnitude + right_touch_magnitude
+        # Combine them in an array and check if any are greater than zero
+        magnitudes = jnp.array(
+            [
+                left_top_touch_magnitude,
+                left_bottom_touch_magnitude,
+                right_touch_magnitude,
+                top_touch_magnitude,
+                bottom_touch_magnitude,
+            ]
+        )
 
-        return total_touch
+        return jnp.where(jnp.any(magnitudes > 0.0), 1.0, 0.0)
 
     def running_cost(self, state: mjx.Data, control: jax.Array) -> jax.Array:
         """The running cost encourages target tracking and avoiding wall collisions."""
@@ -111,7 +140,7 @@ class ParticleCorridor(Task):
         )
 
         # Wall collision cost based on touch sensors
-        wall_cost = self._wall_collision_cost(state)
+        wall_cost = self._wall_collision(state)
 
         return (
             1e1 * position_cost
@@ -120,13 +149,22 @@ class ParticleCorridor(Task):
         )
 
     def terminal_cost(self, state: mjx.Data) -> jax.Array:
-        """The terminal cost."""
+        """The terminal cost encourages pushing the box out through the door and tracking the target."""
+        # Get the box position
+        box_pos = self._get_box_position(state)
+
+        # Door is at x=0.1, so we want the box to be beyond that (x > 0.1)
+        box_escaped = jnp.where(box_pos[0] > 0.1, 0.0, 1.0)
+
+        # Wall collision penalty
+        wall_cost = self._wall_collision(state)
+
+        # Particle position cost (should track the mocap target)
         position_cost = jnp.sum(
             jnp.square(state.site_xpos[self.particle_id] - state.mocap_pos[0])
         )
-        wall_cost = self._wall_collision_cost(state)
 
-        return 1e1 * position_cost + 1e6 * wall_cost
+        return 1e6 * wall_cost + 1e1 * position_cost  # 1e3 * box_escaped +
 
     def domain_randomize_model(self, rng: jax.Array) -> Dict[str, jax.Array]:
         """Randomly perturb the actuator gains."""

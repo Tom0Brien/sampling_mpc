@@ -9,11 +9,11 @@ from mppii.simulation.deterministic import run_interactive
 from mppii.tasks.particle_corridor import ParticleCorridor
 
 """
-Run an interactive simulation of the particle pushing a box through a corridor.
+Run an interactive simulation of the particle pushing a box out of an enclosed room.
 
 Double click on the green target, then drag it around with [ctrl + right-click].
-The particle (red) should reach the target and push the box (orange) through the corridor
-without letting the box touch the walls.
+The particle (red) should push the box (orange) out of the room through the door
+without letting either the particle or box touch the walls.
 """
 
 # Parse command-line arguments
