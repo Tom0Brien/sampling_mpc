@@ -63,9 +63,9 @@ elif args.algorithm == "mppi":
             num_samples=2000,
             noise_level=np.array(
                 [
-                    0.01,  # x reference noise level
-                    0.01,  # y reference noise level
-                    0.01,  # z reference noise level
+                    0.05,  # x reference noise level
+                    0.05,  # y reference noise level
+                    0.05,  # z reference noise level
                     0.01,  # roll reference noise level
                     0.01,  # pitch reference noise level
                     0.01,  # yaw reference noise level
@@ -86,7 +86,21 @@ elif args.algorithm == "mppi":
             temperature=0.001,
         )
     else:
-        ctrl = MPPI(task, num_samples=1000, noise_level=0.1, temperature=0.05)
+        ctrl = MPPI(
+            task,
+            num_samples=1000,
+            noise_level=np.array(
+                [
+                    0.01,  # x reference noise level
+                    0.01,  # y reference noise level
+                    0.01,  # z reference noise level
+                    0.01,  # roll reference noise level
+                    0.01,  # pitch reference noise level
+                    0.01,  # yaw reference noise level
+                ]
+            ),
+            temperature=0.001,
+        )
 
 elif args.algorithm == "cmaes":
     print("Running CMA-ES")
@@ -152,7 +166,7 @@ run_interactive(
     max_traces=6,
     trace_width=6,
     trace_color=[0.0, 0.0, 1.0, 0.5],
-    record_video=False,
+    record_video=True,
     show_debug_info=True,
     plot_costs=True,
 )

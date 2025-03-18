@@ -15,7 +15,7 @@ class FrankaPush(Task):
 
     def __init__(
         self,
-        planning_horizon: int = 20,
+        planning_horizon: int = 10,
         sim_steps_per_control_step: int = 5,
         optimize_gains: bool = False,
     ):
@@ -58,13 +58,16 @@ class FrankaPush(Task):
     def running_cost(self, state: mjx.Data, control: jax.Array) -> jax.Array:
         """The running cost ℓ(xₜ, uₜ) encourages pushing the box to the goal."""
         state_cost = self.terminal_cost(state)
-        return state_cost
+        control_cost = jnp.sum(jnp.square(state.actuator_force))
+        return state_cost + 0.01 * control_cost
 
     def terminal_cost(self, state: mjx.Data) -> jax.Array:
         """The terminal cost ϕ(x_T)."""
-        # Desired box position
-        desired_box_pos = jnp.array([0.7, 0.0, 0.4])
-        desired_box_orientation = jnp.array([1.0, 0.0, 0.0, 0.0])
+        # Use mocap position as the desired box position
+        desired_box_pos = state.mocap_pos[0]
+        # Extract the mocap orientation as desired box orientation
+        desired_box_orientation = state.mocap_quat[0]
+
         current_box_pos = state.xpos[self.box_id]
         box_rot = state.xmat[self.box_id].reshape((3, 3))
         box_quat = mat_to_quat(box_rot)
@@ -87,6 +90,6 @@ class FrankaPush(Task):
         return (
             50.0 * box_pos_cost  # Box position
             + 0.0 * box_orientation_cost  # Box orientation
-            + 5.0 * box_to_gripper_cost  # Adaptive gripper-box coupling
-            + 10.0 * gripper_orientation_cost  # Gripper orientation
+            + 10.0 * box_to_gripper_cost  # Adaptive gripper-box coupling
+            + 0 * gripper_orientation_cost  # Gripper orientation
         )
