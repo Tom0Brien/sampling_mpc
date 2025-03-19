@@ -14,6 +14,7 @@ dependencies = [
     "tensorboard>=2.19.0",
     "tensorboard-plugin-profile>=2.19.0",
     "tensorflow>=2.19.0",
+    "mediapy>=1.2.2",
 ]
 [tool.setuptools]
 packages = ["hydrax"]
