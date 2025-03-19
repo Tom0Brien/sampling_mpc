@@ -4,9 +4,9 @@ import evosax
 import mujoco
 import numpy as np
 
-from mppii.algs import MPPI, Evosax, PredictiveSampling
-from mppii.simulation.deterministic import run_interactive
-from mppii.tasks.franka_push import FrankaPush
+from hydrax.algs import MPPI, Evosax, PredictiveSampling
+from hydrax.simulation.deterministic import run_interactive
+from hydrax.tasks.franka_push import FrankaPush
 
 """
 Run an interactive simulation of the box pushing task.
@@ -31,6 +31,7 @@ subparsers.add_parser("cmaes", help="CMA-ES")
 subparsers.add_parser(
     "samr", help="Genetic Algorithm with Self-Adaptation Mutation Rate (SAMR)"
 )
+subparsers.add_parser("gesmr", help="GESMR-GA")
 subparsers.add_parser("de", help="Differential Evolution")
 subparsers.add_parser("gld", help="Gradient-Less Descent")
 subparsers.add_parser("rs", help="Uniform Random Search")
@@ -109,6 +110,10 @@ elif args.algorithm == "cmaes":
 elif args.algorithm == "samr":
     print("Running genetic algorithm with Self-Adaptation Mutation Rate (SAMR)")
     ctrl = Evosax(task, evosax.SAMR_GA, num_samples=1024)
+
+elif args.algorithm == "gesmr":
+    print("Running GESMR-GA")
+    ctrl = Evosax(task, evosax.GESMR_GA, num_samples=1024)
 
 elif args.algorithm == "de":
     print("Running Differential Evolution (DE)")

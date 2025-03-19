@@ -4,9 +4,9 @@ import evosax
 import mujoco
 import numpy as np
 
-from mppii.algs import MPPI, Evosax, PredictiveSampling
-from mppii.simulation.deterministic import run_interactive
-from mppii.tasks.franka_reach import FrankaReach
+from hydrax.algs import MPPI, Evosax, PredictiveSampling
+from hydrax.simulation.deterministic import run_interactive
+from hydrax.tasks.franka_reach import FrankaReach
 
 """
 Run an interactive simulation of the particle tracking task.
@@ -62,12 +62,12 @@ elif args.algorithm == "mppi":
             num_samples=2000,
             noise_level=np.array(
                 [
-                    0.05,  # x reference noise level
-                    0.05,  # y reference noise level
-                    0.05,  # z reference noise level
-                    0.05,  # roll reference noise level
-                    0.05,  # pitch reference noise level
-                    0.05,  # yaw reference noise level
+                    0.01,  # x reference noise level
+                    0.01,  # y reference noise level
+                    0.01,  # z reference noise level
+                    0.01,  # roll reference noise level
+                    0.01,  # pitch reference noise level
+                    0.01,  # yaw reference noise level
                     1,  # kp x noise level
                     1,  # kp y noise level
                     1,  # kp z noise level
@@ -85,7 +85,7 @@ elif args.algorithm == "mppi":
             temperature=0.001,
         )
     else:
-        ctrl = MPPI(task, num_samples=2000, noise_level=0.05, temperature=0.001)
+        ctrl = MPPI(task, num_samples=2000, noise_level=0.01, temperature=0.001)
 
 elif args.algorithm == "cmaes":
     print("Running CMA-ES")

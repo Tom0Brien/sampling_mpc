@@ -6,7 +6,7 @@
       <geom conaffinity="0" contype="0" rgba="0 1 0 0.2"/>
     </default>
     <default class="translation">
-      <position kp="80" kv="20" ctrlrange="-0.25 0.25"/>
+      <position kp="100" kv="20" ctrlrange="-0.25 0.25"/>
     </default>
     <geom friction="1"/>
   </default>

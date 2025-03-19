@@ -5,9 +5,9 @@ import jax.numpy as jnp
 import mujoco
 from mujoco import mjx
 
-from mppii import ROOT
-from mppii.task_base import Task
-from mppii.util import mat_to_quat, eul_to_quat, orientation_error, mat_to_rpy
+from hydrax import ROOT
+from hydrax.task_base import Task
+from hydrax.util import mat_to_quat, eul_to_quat, orientation_error, mat_to_rpy
 
 
 class FrankaPush(Task):
@@ -59,7 +59,7 @@ class FrankaPush(Task):
         """The running cost ℓ(xₜ, uₜ) encourages pushing the box to the goal."""
         state_cost = self.terminal_cost(state)
         control_cost = jnp.sum(jnp.square(state.actuator_force))
-        return state_cost + 0.01 * control_cost
+        return state_cost + 0.001 * control_cost
 
     def terminal_cost(self, state: mjx.Data) -> jax.Array:
         """The terminal cost ϕ(x_T)."""
@@ -96,8 +96,8 @@ class FrankaPush(Task):
         )
 
         return (
-            50.0 * box_pos_cost  # Box position
+            100.0 * box_pos_cost  # Box position
             + 0.0 * box_orientation_cost  # Box orientation
-            + 50.0 * box_to_gripper_cost  # Close to box cost
+            + 40.0 * box_to_gripper_cost  # Close to box cost
             + 0 * gripper_orientation_cost  # Gripper orientation
         )
