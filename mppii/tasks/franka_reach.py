@@ -57,13 +57,16 @@ class FrankaReach(Task):
     def running_cost(self, state: mjx.Data, control: jax.Array) -> jax.Array:
         """The running cost ℓ(xₜ, uₜ) encourages target tracking."""
         state_cost = self.terminal_cost(state)
-        control_cost = jnp.sum(jnp.square(control))
-        return state_cost  # + 0.1 * control_cost
+        # Compute the control cost: sum of squared actuator forces
+        control_cost = jnp.sum(jnp.square(state.actuator_force))
+        return state_cost + 0.01 * control_cost
 
     def terminal_cost(self, state: mjx.Data) -> jax.Array:
         """The terminal cost ϕ(x_T)."""
-        desired_position = jnp.array([0.5, 0.0, 0.5])
-        desired_orientation = jnp.array([0.0, -1.0, 0.0, 0.0])  # quat
+        # Use mocap position as the desired pose
+        desired_position = state.mocap_pos[0]
+        desired_orientation = state.mocap_quat[0]
+
         position_cost = jnp.sum(
             jnp.square(state.site_xpos[self.gripper_id] - desired_position)
         )
@@ -74,4 +77,4 @@ class FrankaReach(Task):
         orientation_cost = jnp.sum(jnp.square(ori_error))
 
         velocity_cost = jnp.sum(jnp.square(state.qvel))
-        return 5.0 * position_cost + 2.0 * orientation_cost + 0.0 * velocity_cost
+        return 50.0 * position_cost + 10.0 * orientation_cost + 0.0 * velocity_cost

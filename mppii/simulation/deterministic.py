@@ -1,5 +1,5 @@
 import time
-from typing import Sequence
+from typing import Sequence, Dict, Callable, Optional
 
 import jax
 import jax.numpy as jnp
@@ -32,6 +32,9 @@ def run_interactive(
     video_path: str = None,
     plot_costs: bool = False,
     show_debug_info: bool = True,
+    keyboard_control: bool = True,
+    keyboard_step_size: float = 0.01,
+    mocap_index: int = 0,
 ) -> None:
     """Run an interactive simulation with the MPC controller.
 
@@ -57,6 +60,9 @@ def run_interactive(
         trace_color: The RGBA color of the trace lines.
         show_debug_info: Whether to show debug information like costs, gains,
                          and reference positions.
+        keyboard_control: Whether to enable keyboard control of the mocap body.
+        keyboard_step_size: How far to move the mocap body with each key press.
+        mocap_index: Index of the mocap body to control with keyboard (default: 0).
     """
     # Report the planning horizon in seconds for debugging
     print(
@@ -82,6 +88,10 @@ def run_interactive(
         mocap_pos=mj_data.mocap_pos, mocap_quat=mj_data.mocap_quat
     )
     policy_params = controller.init_params()
+    # Set the mean of the policy to the initial control in data for whole horizon
+    policy_params.replace(
+        mean=jnp.tile(mj_data.ctrl, (controller.task.planning_horizon, 1))
+    )
     jit_optimize = jax.jit(controller.optimize, donate_argnums=(1,))
 
     # Warm-up the controller
@@ -108,8 +118,25 @@ def run_interactive(
     d_gain_history = []
     control_history = []
 
+    # Define key callback function for moving mocap body
+    def key_callback(keycode):
+        if not keyboard_control:
+            return
+        key = keycode & 0xFF
+        if key == 7:  # LEFT
+            mj_data.mocap_pos[mocap_index, 0] -= keyboard_step_size
+        elif key == 6:  # RIGHT
+            mj_data.mocap_pos[mocap_index, 0] += keyboard_step_size
+        elif key == 9:  # UP
+            mj_data.mocap_pos[mocap_index, 1] += keyboard_step_size
+        elif key == 8:  # DOWN
+            mj_data.mocap_pos[mocap_index, 1] -= keyboard_step_size
+
     # Start the simulation
-    with mujoco.viewer.launch_passive(mj_model, mj_data) as viewer:
+    # jax.profiler.start_trace("/tmp/tensorboard")
+    with mujoco.viewer.launch_passive(
+        mj_model, mj_data, key_callback=key_callback
+    ) as viewer:
         if fixed_camera_id is not None:
             # Set the custom camera
             viewer.cam.fixedcamid = fixed_camera_id
@@ -136,6 +163,19 @@ def run_interactive(
 
             # Clear previous text overlays
             viewer.user_scn.ngeom = 0
+
+            # # Handle continuous key presses for smoother movement
+            # if keyboard_control:
+            #     for key, pressed in key_state.items():
+            #         if pressed:
+            #             if key == 7:  # LEFT
+            #                 mj_data.mocap_pos[mocap_index, 0] -= keyboard_step_size
+            #             elif key == 6:  # RIGHT
+            #                 mj_data.mocap_pos[mocap_index, 0] += keyboard_step_size
+            #             elif key == 9:  # UP
+            #                 mj_data.mocap_pos[mocap_index, 1] += keyboard_step_size
+            #             elif key == 8:  # DOWN
+            #                 mj_data.mocap_pos[mocap_index, 1] -= keyboard_step_size
 
             # Set the start state for the controller
             mjx_data = mjx_data.replace(
@@ -307,7 +347,7 @@ def run_interactive(
 
     # Preserve the last printout
     print("")
-
+    # jax.profiler.stop_trace()
     # Plot cost and gain history if requested
     if plot_costs and cost_history:
         try:

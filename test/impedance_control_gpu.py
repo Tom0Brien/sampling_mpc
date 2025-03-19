@@ -15,7 +15,6 @@ from typing import Tuple, List, Optional
 from mujoco.mjx._src.support import jac
 from util import *
 import os 
-from mppii import ROOT
 
 # Set XLA flags for better performance
 os.environ["XLA_FLAGS"] = "--xla_gpu_triton_gemm_any=true "
@@ -166,6 +165,7 @@ def run_parallel_simulations(
     
     # JIT compile for efficiency
     jit_vmap_control_step = jax.jit(vmap_control_step)
+    jit_vmap_control_step(data_batch, p_des_array, eul_des_array)
     
     # Initialize storage for rollouts
     rollouts = [[None for _ in range(N)] for _ in range(K)]
@@ -273,7 +273,7 @@ def visualize_rollouts(
         time.sleep(1.0)
 
 if __name__ == "__main__":
-    xml_path = ROOT + "/models/franka_emika_panda/mjx_scene.xml"
+    xml_path = "models/franka_emika_panda/mjx_scene.xml"
     model = mujoco.MjModel.from_xml_path(xml_path)
     
     # Set up simulation parameters

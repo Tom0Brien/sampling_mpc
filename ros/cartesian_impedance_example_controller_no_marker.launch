@@ -3,13 +3,11 @@
   <arg name="robot" default="panda" doc="choose your robot. Possible values: [panda, fr3]"/>
   <arg name="arm_id" default="$(arg robot)" />
   
-  <!-- Launch Gazebo with empty world -->
-  <include file="$(find gazebo_ros)/launch/empty_world.launch"/>
-  
   <!-- Spawn robot in Gazebo -->
   <include file="$(find franka_gazebo)/launch/panda.launch">
     <arg name="arm_id" value="$(arg arm_id)"/>
     <arg name="world" value="$(find franka_gazebo)/world/empty.world"/>
+    <arg name="x" value="-0.5"/>
   </include>
 
   <!-- Load controllers -->

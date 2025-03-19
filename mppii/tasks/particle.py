@@ -14,7 +14,7 @@ class Particle(Task):
 
     def __init__(
         self,
-        planning_horizon: int = 10,
+        planning_horizon: int = 5,
         sim_steps_per_control_step: int = 5,
         optimize_gains: bool = False,
     ):
@@ -52,16 +52,16 @@ class Particle(Task):
 
     def running_cost(self, state: mjx.Data, control: jax.Array) -> jax.Array:
         """The running cost ℓ(xₜ, uₜ) encourages target tracking."""
-        state_cost = self.terminal_cost(state)
-        return state_cost
+        terminal_cost = self.terminal_cost(state)
+        return terminal_cost
 
     def terminal_cost(self, state: mjx.Data) -> jax.Array:
         """The terminal cost ϕ(x_T)."""
         position_cost = jnp.sum(
             jnp.square(state.site_xpos[self.particle_id] - state.mocap_pos[0])
         )
-        velocity_cost = jnp.sum(jnp.square(state.qvel))
-        return 1e1 * position_cost  # + 0.01 * velocity_cost
+        control_cost = jnp.sum(jnp.square(state.actuator_force))
+        return 1e1 * position_cost + 1 * control_cost
 
     def domain_randomize_model(self, rng: jax.Array) -> Dict[str, jax.Array]:
         """Randomly perturb the actuator gains."""

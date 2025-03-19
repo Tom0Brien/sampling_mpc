@@ -96,8 +96,8 @@ class FrankaPush(Task):
         )
 
         return (
-            50.0 * box_pos_cost  # Box position
+            100.0 * box_pos_cost  # Box position
             + 0.0 * box_orientation_cost  # Box orientation
-            + 50.0 * box_to_gripper_cost  # Close to box cost
+            + 40.0 * box_to_gripper_cost  # Close to box cost
             + 0 * gripper_orientation_cost  # Gripper orientation
         )
