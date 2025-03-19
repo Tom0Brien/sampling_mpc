@@ -35,7 +35,7 @@ services:
     tty: true
     depends_on:
       - roscore
-    command: /bin/bash -c '. /catkin_ws/devel/setup.bash && roslaunch --wait franka_example_controllers cartesian_impedance_example_controller_no_marker.launch robot:=fr3 load_gripper:=True'
+    command: /bin/bash -c '. /catkin_ws/devel/setup.bash && roslaunch --wait franka_example_controllers cartesian_impedance_example_controller_no_marker.launch robot:=panda load_gripper:=True'
 
   main:
     build: .

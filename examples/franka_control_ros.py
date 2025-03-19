@@ -1,0 +1,282 @@
+#!/usr/bin/env python3
+import roslibpy
+import time
+import numpy as np
+import argparse
+import jax
+import jax.numpy as jnp
+import mujoco
+from mujoco import mjx
+from scipy.spatial.transform import Rotation
+
+from hydrax.algs import MPPI, PredictiveSampling
+from hydrax.tasks.franka_reach import FrankaReach
+
+"""
+Control loop for Franka robot using ROS for communication and Hydrax for control.
+This script connects to ROS, subscribes to the robot state topic, computes control
+actions using a sampling-based controller, and sends commands to the robot.
+"""
+
+
+class FrankaRosControl:
+    def __init__(
+        self, host="localhost", port=9090, controller_type="ps", optimize_gains=False
+    ):
+        # ROS connection
+        self.client = roslibpy.Ros(host=host, port=port)
+        self.client.run()
+        print(f"Connected to ROS: {self.client.is_connected}")
+
+        # Setup subscribers for robot state
+        self.joint_state_sub = roslibpy.Topic(
+            self.client, "/joint_states", "sensor_msgs/JointState"
+        )
+
+        # Setup publisher for cartesian pose commands
+        self.cartesian_pose_pub = roslibpy.Topic(
+            self.client,
+            "/cartesian_impedance_controller/equilibrium_pose",
+            "geometry_msgs/PoseStamped",
+        )
+        self.cartesian_pose_pub.advertise()
+
+        # Latest state information
+        self.current_joint_positions = None
+        self.current_joint_velocities = None
+        self.current_end_effector_pose = None
+
+        # Initialize the Hydrax task and controller
+        self.task = FrankaReach(optimize_gains=optimize_gains)
+        self.mj_model = self.task.mj_model
+        self.mj_data = mujoco.MjData(self.mj_model)
+        self.mjx_data = mjx.put_data(self.mj_model, self.mj_data)
+
+        # Set the initial joint positions
+        self.mj_data.qpos[:7] = [-0.196, -0.189, 0.182, -2.1, 0.0378, 1.91, 0.756]
+
+        # Set up the controller based on type
+        if controller_type == "ps":
+            print("Using Predictive Sampling controller")
+            self.controller = PredictiveSampling(
+                self.task,
+                num_samples=128,
+                noise_level=0.05,
+            )
+        elif controller_type == "mppi":
+            print("Using MPPI controller")
+            noise_level = 0.01
+            if optimize_gains:
+                # Set noise levels for position, orientation, and gains
+                noise_level = np.array(
+                    [0.01] * 6 + [1.0] * 12
+                )  # 6 pose params + 12 gain params
+
+            self.controller = MPPI(
+                self.task,
+                num_samples=2000,
+                noise_level=noise_level,
+                temperature=0.001,
+            )
+        else:
+            raise ValueError(f"Unsupported controller type: {controller_type}")
+
+        # JIT compile the optimizer
+        self.jit_optimize = jax.jit(self.controller.optimize, donate_argnums=(1,))
+        self.get_action = jax.jit(self.controller.get_action)
+
+        # Initialize policy parameters
+        self.policy_params = self.controller.init_params()
+
+        # Set up joint state callback
+        self.joint_state_sub.subscribe(self.joint_state_callback)
+
+        # Wait for first joint state message
+        print("Waiting for joint state messages...")
+        while self.current_joint_positions is None:
+            time.sleep(0.1)
+        print("Received initial joint state")
+
+        # Add logger subscription
+        self.rosout_sub = roslibpy.Topic(self.client, "/rosout", "rosgraph_msgs/Log")
+        self.rosout_sub.subscribe(self.rosout_callback)
+
+    def joint_state_callback(self, message):
+        """Callback for joint state messages"""
+        # Extract joint positions and velocities
+        self.current_joint_positions = np.array(message["position"])
+        self.current_joint_velocities = np.array(message["velocity"])
+
+    def update_controller_state(self):
+        """Update the controller's state with latest robot state"""
+
+        # Update the state in mjx_data (need to map joint states to qpos/qvel)
+        # This depends on how your task is set up - you may need to adjust indices
+        # TODO: Check this is correct
+        self.mjx_data = self.mjx_data.replace(
+            qpos=jnp.array(self.current_joint_positions),
+            qvel=jnp.array(self.current_joint_velocities),
+        )
+
+    def send_cartesian_command(self, pose):
+        """
+        Send a cartesian pose command to the robot
+        pose: [x, y, z, roll, pitch, yaw]
+        """
+        # Convert roll, pitch, yaw to quaternion
+        r = Rotation.from_euler("xyz", pose[3:6])
+        quat = r.as_quat()  # [x, y, z, w]
+
+        # Create pose message
+        pose_msg = {
+            "header": {
+                "frame_id": "panda_link0",
+                "stamp": {
+                    "secs": int(time.time()),
+                    "nsecs": int((time.time() % 1) * 1e9),
+                },
+            },
+            "pose": {
+                "position": {
+                    "x": float(pose[0]),
+                    "y": float(pose[1]),
+                    "z": float(pose[2]),
+                },
+                "orientation": {
+                    "x": float(quat[0]),
+                    "y": float(quat[1]),
+                    "z": float(quat[2]),
+                    "w": float(quat[3]),
+                },
+            },
+        }
+
+        # Publish the pose message
+        self.cartesian_pose_pub.publish(roslibpy.Message(pose_msg))
+
+    def rosout_callback(self, message):
+        # Filter by log level if desired (1=DEBUG, 2=INFO, 4=WARN, 8=ERROR, 16=FATAL)
+        if message.get("level", 0) >= 4:  # WARN or higher
+            print(
+                f"ROS LOG [{message.get('name', 'unknown')}]: {message.get('msg', '')}"
+            )
+
+    def run_control_loop(self, frequency=10, duration=None):
+        """
+        Run the control loop at the specified frequency
+        frequency: control frequency in Hz
+        duration: duration in seconds (None for infinite)
+        """
+        period = 1.0 / frequency
+        start_time = time.time()
+        iteration = 0
+
+        print(f"Starting control loop at {frequency} Hz")
+
+        try:
+            while self.client.is_connected:
+                loop_start = time.time()
+
+                # Check if duration is exceeded
+                if duration is not None and time.time() - start_time > duration:
+                    print(f"Control duration of {duration}s reached")
+                    break
+
+                # Update controller state with latest robot state
+                self.update_controller_state()
+
+                # Optimize control policy
+                plan_start = time.time()
+                self.policy_params, rollouts = self.jit_optimize(
+                    self.mjx_data, self.policy_params
+                )
+                plan_time = time.time() - plan_start
+
+                # Get control action
+                t = 0.0  # Time within the current control interval
+                action = self.get_action(self.policy_params, t)
+
+                # Handle the case where the action includes gains
+                if self.task.optimize_gains:
+                    # Extract control and gains
+                    pose_command, p_gains, d_gains = self.task.extract_gains(action)
+                    print(
+                        f"Sending pose: {pose_command}, P-gains: {p_gains}, D-gains: {d_gains}"
+                    )
+                    self.send_cartesian_command(pose_command)
+                    # Note: You might want to send the gains to a separate ROS topic if your
+                    # controller supports dynamic gain adjustment
+                else:
+                    # Action is directly the pose command
+                    pose_command = action
+                    print(f"Sending pose: {pose_command}")
+                    self.send_cartesian_command(pose_command)
+
+                # Calculate cost for logging
+                total_cost = float(jnp.sum(rollouts.costs[0]))
+
+                # Sleep to maintain the desired control frequency
+                elapsed = time.time() - loop_start
+                if elapsed < period:
+                    time.sleep(period - elapsed)
+
+                # Print status
+                rtr = period / (time.time() - loop_start)  # Real-time ratio
+                print(
+                    f"Iter {iteration}: RTR: {rtr:.2f}, plan: {plan_time:.4f}s, cost: {total_cost:.4f}",
+                    end="\r",
+                )
+
+                iteration += 1
+
+        except KeyboardInterrupt:
+            print("\nControl interrupted by user")
+        finally:
+            # Clean up ROS connections
+            self.cartesian_pose_pub.unadvertise()
+            self.joint_state_sub.unsubscribe()
+            self.rosout_sub.unsubscribe()
+            self.client.terminate()
+            print("\nROS connections closed")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Franka Control using ROS and Hydrax")
+    parser.add_argument(
+        "--host", type=str, default="localhost", help="ROS websocket host"
+    )
+    parser.add_argument("--port", type=int, default=9090, help="ROS websocket port")
+    parser.add_argument(
+        "--frequency", type=float, default=10.0, help="Control frequency in Hz"
+    )
+    parser.add_argument(
+        "--duration", type=float, default=None, help="Control duration in seconds"
+    )
+    parser.add_argument(
+        "--controller",
+        type=str,
+        default="ps",
+        choices=["ps", "mppi"],
+        help="Controller type (ps for Predictive Sampling, mppi for MPPI)",
+    )
+    parser.add_argument(
+        "--optimize-gains",
+        action="store_true",
+        help="Optimize controller gains along with poses",
+    )
+
+    args = parser.parse_args()
+
+    controller = FrankaRosControl(
+        host=args.host,
+        port=args.port,
+        controller_type=args.controller,
+        optimize_gains=args.optimize_gains,
+    )
+
+    controller.run_control_loop(frequency=args.frequency, duration=args.duration)
+
+
+if __name__ == "__main__":
+    print("Starting Franka control loop")
+    main()
