@@ -5,8 +5,8 @@ import jax.numpy as jnp
 import mujoco
 from mujoco import mjx
 
-from mppii import ROOT
-from mppii.task_base import Task
+from hydrax import ROOT
+from hydrax.task_base import Task
 
 
 class PushBox(Task):

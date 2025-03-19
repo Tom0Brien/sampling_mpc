@@ -7,8 +7,8 @@ import jax.numpy as jnp
 from flax.struct import dataclass
 from mujoco import mjx
 
-from mppii.risk import AverageCost, RiskStrategy
-from mppii.task_base import Task
+from hydrax.risk import AverageCost, RiskStrategy
+from hydrax.task_base import Task
 
 
 @dataclass

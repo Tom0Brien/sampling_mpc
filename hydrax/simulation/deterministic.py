@@ -10,7 +10,7 @@ from mujoco import mjx
 import mediapy as media
 import matplotlib.pyplot as plt
 
-from mppii.alg_base import SamplingBasedController
+from hydrax.alg_base import SamplingBasedController
 
 """
 Tools for deterministic (synchronous) simulation, with the simulator and

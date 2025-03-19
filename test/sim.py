@@ -2,7 +2,7 @@
 import mujoco
 import mujoco.viewer
 import time
-from mppii import ROOT
+from hydrax import ROOT
 
 
 def main():

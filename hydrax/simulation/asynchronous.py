@@ -9,7 +9,7 @@ import mujoco.viewer
 import numpy as np
 from mujoco import mjx
 
-from mppii.alg_base import SamplingBasedController
+from hydrax.alg_base import SamplingBasedController
 
 """
 Utilities for asynchronous simulation, with the simulator and controller running

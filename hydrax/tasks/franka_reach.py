@@ -5,9 +5,9 @@ import jax.numpy as jnp
 import mujoco
 from mujoco import mjx
 
-from mppii import ROOT
-from mppii.task_base import Task
-from mppii.util import mat_to_quat, eul_to_quat, orientation_error
+from hydrax import ROOT
+from hydrax.task_base import Task
+from hydrax.util import mat_to_quat, eul_to_quat, orientation_error
 
 
 class FrankaReach(Task):

@@ -4,9 +4,9 @@ import jax
 import jax.numpy as jnp
 from flax.struct import dataclass
 
-from mppii.alg_base import SamplingBasedController, Trajectory
-from mppii.risk import RiskStrategy
-from mppii.task_base import Task
+from hydrax.alg_base import SamplingBasedController, Trajectory
+from hydrax.risk import RiskStrategy
+from hydrax.task_base import Task
 
 
 @dataclass

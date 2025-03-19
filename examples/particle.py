@@ -3,9 +3,9 @@ import evosax
 import mujoco
 import numpy as np
 
-from mppii.algs import MPPI, Evosax, PredictiveSampling
-from mppii.simulation.deterministic import run_interactive
-from mppii.tasks.particle import Particle
+from hydrax.algs import MPPI, Evosax, PredictiveSampling
+from hydrax.simulation.deterministic import run_interactive
+from hydrax.tasks.particle import Particle
 
 """
 Run an interactive simulation of the particle tracking task.
