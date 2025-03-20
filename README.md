@@ -25,4 +25,6 @@ To run
 docker compose up
 ```
 
+**_Note: For GUI applications to work, you may need to run `xhost +local:` to allow the Docker container to access the X server on your host machine._**
+
 Now we have access to the full Franka ROS interface documented [`here`](https://frankaemika.github.io/docs/franka_ros.html).
