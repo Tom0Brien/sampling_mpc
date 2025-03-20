@@ -36,10 +36,14 @@ class FrankaRosControl:
         # Setup publisher for cartesian pose commands
         self.cartesian_pose_pub = roslibpy.Topic(
             self.client,
-            "/cartesian_impedance_controller/equilibrium_pose",
+            "/cartesian_impedance_example_controller/equilibrium_pose",
             "geometry_msgs/PoseStamped",
+            queue_size=10,
         )
         self.cartesian_pose_pub.advertise()
+
+        # Wait for publishers to be ready
+        time.sleep(1.0)
 
         # Latest state information
         self.current_joint_positions = None
@@ -54,6 +58,9 @@ class FrankaRosControl:
 
         # Set the initial joint positions
         self.mj_data.qpos[:7] = [-0.196, -0.189, 0.182, -2.1, 0.0378, 1.91, 0.756]
+
+        # Initial desired pose as a single 7D vector: [x, y, z, qx, qy, qz, qw]
+        self.desired_pose = np.array([0.5, 0.0, 0.5, 0.0, 0.0, 0.0, 1.0])
 
         # Set up the controller based on type
         if controller_type == "ps":
@@ -117,15 +124,28 @@ class FrankaRosControl:
             qpos=jnp.array(self.current_joint_positions),
             qvel=jnp.array(self.current_joint_velocities),
         )
+        # Store a CPU version of the state for visualization and transforms
+        self.mj_data.qpos = np.array(self.current_joint_positions)
+        self.mj_data.qvel = np.array(self.current_joint_velocities)
+        mujoco.mj_forward(self.mj_model, self.mj_data)
 
     def send_cartesian_command(self, pose):
         """
         Send a cartesian pose command to the robot
         pose: [x, y, z, roll, pitch, yaw]
         """
-        # Convert roll, pitch, yaw to quaternion
-        r = Rotation.from_euler("xyz", pose[3:6])
+        # Transform the pose to the robot base frame (mujoco control is in reference frame)
+        Rbr = self.mj_data.site_xmat[self.controller.task.reference_id].reshape(3, 3)
+        rRBb = self.mj_data.site_xpos[self.controller.task.reference_id]
+
+        rGBb = rRBb + Rbr @ pose[0:3]
+        Rrg = Rotation.from_euler("xyz", pose[3:6])
+        # Rotate the desired pose from reference frame to robot base frame
+        Rbg = Rbr @ Rrg.as_matrix()
+        r = Rotation.from_matrix(Rbg)
         quat = r.as_quat()  # [x, y, z, w]
+        # Normalize the quaternion
+        quat = quat / jnp.linalg.norm(quat)
 
         # Create pose message
         pose_msg = {
@@ -138,9 +158,9 @@ class FrankaRosControl:
             },
             "pose": {
                 "position": {
-                    "x": float(pose[0]),
-                    "y": float(pose[1]),
-                    "z": float(pose[2]),
+                    "x": float(rGBb[0]),
+                    "y": float(rGBb[1]),
+                    "z": float(rGBb[2]),
                 },
                 "orientation": {
                     "x": float(quat[0]),
@@ -150,6 +170,9 @@ class FrankaRosControl:
                 },
             },
         }
+
+        # Save the desired pose as a single 7D vector: [x, y, z, qx, qy, qz, qw]
+        self.desired_pose = np.concatenate([rGBb, quat])
 
         # Publish the pose message
         self.cartesian_pose_pub.publish(roslibpy.Message(pose_msg))
@@ -161,11 +184,15 @@ class FrankaRosControl:
                 f"ROS LOG [{message.get('name', 'unknown')}]: {message.get('msg', '')}"
             )
 
-    def run_control_loop(self, frequency=10, duration=None):
+    def run_control_loop(
+        self, frequency=10, duration=None, enable_viewer=False, fixed_camera_id=None
+    ):
         """
         Run the control loop at the specified frequency
         frequency: control frequency in Hz
         duration: duration in seconds (None for infinite)
+        enable_viewer: whether to enable the MuJoCo viewer for debugging
+        fixed_camera_id: camera ID to use for the fixed camera view
         """
         period = 1.0 / frequency
         start_time = time.time()
@@ -173,13 +200,28 @@ class FrankaRosControl:
 
         print(f"Starting control loop at {frequency} Hz")
 
+        viewer = None
         try:
+            # Initialize the MuJoCo viewer if requested
+            if enable_viewer:
+                print("Starting MuJoCo viewer for debugging")
+                viewer = mujoco.viewer.launch_passive(self.mj_model, self.mj_data)
+                if fixed_camera_id is not None:
+                    # Set the custom camera
+                    viewer.cam.fixedcamid = fixed_camera_id
+                    viewer.cam.type = 2
+
             while self.client.is_connected:
                 loop_start = time.time()
 
                 # Check if duration is exceeded
                 if duration is not None and time.time() - start_time > duration:
                     print(f"Control duration of {duration}s reached")
+                    break
+
+                # Check if viewer was closed
+                if enable_viewer and not viewer.is_running():
+                    print("Viewer closed, stopping control loop")
                     break
 
                 # Update controller state with latest robot state
@@ -215,6 +257,46 @@ class FrankaRosControl:
                 # Calculate cost for logging
                 total_cost = float(jnp.sum(rollouts.costs[0]))
 
+                # Update the viewer if enabled
+                if enable_viewer:
+                    # Clear previous geoms
+                    viewer.user_scn.ngeom = 0
+
+                    # Add visualization of desired pose with a red sphere
+                    if hasattr(self, "desired_pose"):
+                        # The desired_pose is now a single 7D vector: [x, y, z, qx, qy, qz, qw]
+                        geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
+                        mujoco.mjv_initGeom(
+                            geom,
+                            type=mujoco.mjtGeom.mjGEOM_SPHERE,
+                            size=[0.02, 0, 0],  # Size of the sphere (radius)
+                            pos=self.desired_pose[:3],  # First 3 elements are position
+                            mat=np.eye(3).flatten(),
+                            rgba=[
+                                1.0,
+                                0.0,
+                                0.0,
+                                0.8,
+                            ],  # Red color with some transparency
+                        )
+                        viewer.user_scn.ngeom += 1
+
+                        # Add a text label for the desired pose
+                        geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
+                        mujoco.mjv_initGeom(
+                            geom,
+                            type=mujoco.mjtGeom.mjGEOM_LABEL,
+                            size=np.array([0.15, 0.15, 0.15]),
+                            pos=self.desired_pose[:3]
+                            + np.array([0.0, 0.0, 0.05]),  # Position above the sphere
+                            mat=np.eye(3).flatten(),
+                            rgba=np.array([1, 1, 1, 1]),  # White text
+                        )
+                        geom.label = "Target"
+                        viewer.user_scn.ngeom += 1
+
+                    viewer.sync()
+
                 # Sleep to maintain the desired control frequency
                 elapsed = time.time() - loop_start
                 if elapsed < period:
@@ -232,6 +314,10 @@ class FrankaRosControl:
         except KeyboardInterrupt:
             print("\nControl interrupted by user")
         finally:
+            # Clean up MuJoCo viewer
+            if enable_viewer and viewer is not None:
+                viewer.close()
+
             # Clean up ROS connections
             self.cartesian_pose_pub.unadvertise()
             self.joint_state_sub.unsubscribe()
@@ -264,6 +350,18 @@ def main():
         action="store_true",
         help="Optimize controller gains along with poses",
     )
+    parser.add_argument(
+        "--enable-viewer",
+        action="store_true",
+        default=True,
+        help="Enable MuJoCo viewer for debugging",
+    )
+    parser.add_argument(
+        "--fixed-camera-id",
+        type=int,
+        default=None,
+        help="Camera ID for fixed view in MuJoCo viewer",
+    )
 
     args = parser.parse_args()
 
@@ -274,7 +372,12 @@ def main():
         optimize_gains=args.optimize_gains,
     )
 
-    controller.run_control_loop(frequency=args.frequency, duration=args.duration)
+    controller.run_control_loop(
+        frequency=args.frequency,
+        duration=args.duration,
+        enable_viewer=args.enable_viewer,
+        fixed_camera_id=args.fixed_camera_id,
+    )
 
 
 if __name__ == "__main__":
