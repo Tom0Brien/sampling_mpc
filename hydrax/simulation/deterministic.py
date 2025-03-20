@@ -160,19 +160,6 @@ def run_interactive(
             # Clear previous text overlays
             viewer.user_scn.ngeom = 0
 
-            # # Handle continuous key presses for smoother movement
-            # if keyboard_control:
-            #     for key, pressed in key_state.items():
-            #         if pressed:
-            #             if key == 7:  # LEFT
-            #                 mj_data.mocap_pos[mocap_index, 0] -= keyboard_step_size
-            #             elif key == 6:  # RIGHT
-            #                 mj_data.mocap_pos[mocap_index, 0] += keyboard_step_size
-            #             elif key == 9:  # UP
-            #                 mj_data.mocap_pos[mocap_index, 1] += keyboard_step_size
-            #             elif key == 8:  # DOWN
-            #                 mj_data.mocap_pos[mocap_index, 1] -= keyboard_step_size
-
             # Set the start state for the controller
             mjx_data = mjx_data.replace(
                 qpos=jnp.array(mj_data.qpos),
