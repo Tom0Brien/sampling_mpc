@@ -11,6 +11,7 @@ import mediapy as media
 import matplotlib.pyplot as plt
 
 from hydrax.alg_base import SamplingBasedController
+from hydrax.task_base import GainOptimizationMode
 
 """
 Tools for deterministic (synchronous) simulation, with the simulator and
@@ -202,7 +203,7 @@ def run_interactive(
                 cost_history.append(total_cost)
 
                 # Centralized handling of control and gain information
-                if controller.task.optimize_gains:
+                if controller.task.gain_mode != GainOptimizationMode.NONE:
                     # Extract control and gains
                     ctrl, p_gains, d_gains = controller.task.extract_gains(u)
 
@@ -221,17 +222,26 @@ def run_interactive(
 
                     # Show debug information if enabled
                     if show_debug_info:
-                        # Format gain text
-                        p_gain_text = (
-                            "P-gains: ["
-                            + ", ".join([f"{g:.2f}" for g in p_gains])
-                            + "]"
-                        )
-                        d_gain_text = (
-                            "D-gains: ["
-                            + ", ".join([f"{g:.2f}" for g in d_gains])
-                            + "]"
-                        )
+                        # Format gain text based on gain mode
+                        if controller.task.gain_mode == GainOptimizationMode.SIMPLE:
+                            trans_p_gain = u[controller.task.nu_ctrl]
+                            rot_p_gain = u[controller.task.nu_ctrl + 1]
+                            trans_d_gain = 2.0 * np.sqrt(trans_p_gain)
+                            rot_d_gain = 2.0 * np.sqrt(rot_p_gain)
+
+                            p_gain_text = f"Trans P-gain: {trans_p_gain:.2f}, Rot P-gain: {rot_p_gain:.2f}"
+                            d_gain_text = f"Trans D-gain: {trans_d_gain:.2f}, Rot D-gain: {rot_d_gain:.2f}"
+                        else:
+                            p_gain_text = (
+                                "P-gains: ["
+                                + ", ".join([f"{g:.2f}" for g in p_gains])
+                                + "]"
+                            )
+                            d_gain_text = (
+                                "D-gains: ["
+                                + ", ".join([f"{g:.2f}" for g in d_gains])
+                                + "]"
+                            )
 
                         # Add P-gain text (positioned below cost text)
                         geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
@@ -336,14 +346,16 @@ def run_interactive(
         try:
             # Create figure with multiple subplots
             fig, axes = plt.subplots(
-                1 + (2 if controller.task.optimize_gains else 0) + 1,
+                1
+                + (2 if controller.task.gain_mode != GainOptimizationMode.NONE else 0)
+                + 1,
                 1,
                 figsize=(10, 10),
                 sharex=True,
             )
 
             # If not optimizing gains, axes is not a list, so make it one for consistency
-            if not controller.task.optimize_gains:
+            if controller.task.gain_mode == GainOptimizationMode.NONE:
                 axes = [axes] if not isinstance(axes, np.ndarray) else axes
 
             # Plot cost history
@@ -353,7 +365,11 @@ def run_interactive(
             axes[0].grid(True)
 
             # Plot gain histories if optimizing gains
-            if controller.task.optimize_gains and p_gain_history and d_gain_history:
+            if (
+                controller.task.gain_mode != GainOptimizationMode.NONE
+                and p_gain_history
+                and d_gain_history
+            ):
                 # Convert lists of arrays to 2D arrays
                 p_gains_array = np.array(p_gain_history)
                 d_gains_array = np.array(d_gain_history)

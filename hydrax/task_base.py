@@ -1,10 +1,19 @@
+from enum import Enum, auto
 from abc import ABC, abstractmethod
-from typing import Dict, Sequence, Tuple
+from typing import Dict, Sequence, Tuple, Optional
 
 import jax
 import jax.numpy as jnp
 import mujoco
 from mujoco import mjx
+
+
+class GainOptimizationMode(Enum):
+    """Enumeration of gain optimization modes."""
+
+    NONE = auto()  # No gain optimization
+    INDIVIDUAL = auto()  # Optimize individual p_gain and d_gain for each actuator
+    SIMPLE = auto()  # Optimize just trans/rot p_gains with d_gains as 2*sqrt(p_gain)
 
 
 class Task(ABC):
@@ -25,7 +34,8 @@ class Task(ABC):
         planning_horizon: int,
         sim_steps_per_control_step: int,
         trace_sites: Sequence[str] = [],
-        optimize_gains: bool = False,
+        gain_mode: GainOptimizationMode = GainOptimizationMode.NONE,
+        gain_limits: Optional[Dict[str, float]] = None,
     ):
         """Set the model and simulation parameters.
 
@@ -35,17 +45,17 @@ class Task(ABC):
             sim_steps_per_control_step: The number of simulation steps to take
                                         for each control step.
             trace_sites: A list of site names to visualize with traces.
-            optimize_gains: Whether to optimize the actuator gains along with controls.
-
-        Note: many other simulator parameters, e.g., simulator time step,
-              Newton iterations, etc., are set in the model itself.
+            gain_mode: The gain optimization mode to use.
+            gain_limits: Optional dictionary with custom gain limits. Keys can include:
+                         'p_min', 'p_max', 'd_min', 'd_max' for INDIVIDUAL mode
+                         'trans_p_min', 'trans_p_max', 'rot_p_min', 'rot_p_max' for SIMPLE mode
         """
         assert isinstance(mj_model, mujoco.MjModel)
         self.mj_model = mj_model
         self.model = mjx.put_model(mj_model)
         self.planning_horizon = planning_horizon
         self.sim_steps_per_control_step = sim_steps_per_control_step
-        self.optimize_gains = optimize_gains
+        self.gain_mode = gain_mode
 
         # Set actuator limits
         self.u_min = jnp.where(
@@ -59,24 +69,64 @@ class Task(ABC):
             jnp.inf,
         )
 
-        # Add gain limits if optimizing gains
-        if optimize_gains:
-            # Original control dimensions
-            self.nu_ctrl = mj_model.nu
+        # Original control dimensions
+        self.nu_ctrl = mj_model.nu
+
+        # Default gain limits
+        self._default_gain_limits = {
+            # INDIVIDUAL mode defaults
+            "p_min": 5.0,
+            "p_max": 30.0,
+            "d_min": 1.0,
+            "d_max": 10.0,
+            # SIMPLE mode defaults
+            "trans_p_min": 5.0,
+            "trans_p_max": 30.0,
+            "rot_p_min": 5.0,
+            "rot_p_max": 30.0,
+        }
+
+        # Override with any custom gain limits
+        if gain_limits:
+            self._default_gain_limits.update(gain_limits)
+
+        # Configure based on gain optimization mode
+        if gain_mode == GainOptimizationMode.INDIVIDUAL:
             # Total control dimensions including gains (nu + 2*nu)
             self.nu_total = mj_model.nu * 3
 
-            # Default gain limits - can be overridden by subclasses  kp="10" kv="2"
-            self.p_gain_min = jnp.ones(mj_model.nu) * 5
-            self.p_gain_max = jnp.ones(mj_model.nu) * 30.0
-            self.d_gain_min = jnp.ones(mj_model.nu) * 1
-            self.d_gain_max = jnp.ones(mj_model.nu) * 10
+            # Set gain limits based on defaults or custom values
+            self.p_gain_min = jnp.ones(mj_model.nu) * self._default_gain_limits["p_min"]
+            self.p_gain_max = jnp.ones(mj_model.nu) * self._default_gain_limits["p_max"]
+            self.d_gain_min = jnp.ones(mj_model.nu) * self._default_gain_limits["d_min"]
+            self.d_gain_max = jnp.ones(mj_model.nu) * self._default_gain_limits["d_max"]
 
             # Extend control limits to include gains
             self.u_min = jnp.concatenate([self.u_min, self.p_gain_min, self.d_gain_min])
             self.u_max = jnp.concatenate([self.u_max, self.p_gain_max, self.d_gain_max])
-        else:
-            self.nu_ctrl = mj_model.nu
+
+        elif gain_mode == GainOptimizationMode.SIMPLE:
+            # Total control dimensions including 2 p_gains (trans and rot)
+            self.nu_total = mj_model.nu + 2
+
+            # Default simple gain limits - can be overridden by subclasses
+            self.trans_p_gain_min = self._default_gain_limits["trans_p_min"]
+            self.trans_p_gain_max = self._default_gain_limits["trans_p_max"]
+            self.rot_p_gain_min = self._default_gain_limits["rot_p_min"]
+            self.rot_p_gain_max = self._default_gain_limits["rot_p_max"]
+
+            # Extend control limits to include the two p_gains
+            self.u_min = jnp.concatenate(
+                [self.u_min, jnp.array([self.trans_p_gain_min, self.rot_p_gain_min])]
+            )
+            self.u_max = jnp.concatenate(
+                [self.u_max, jnp.array([self.trans_p_gain_max, self.rot_p_gain_max])]
+            )
+            # Assert the size of the control vector is correct
+            assert self.u_min.shape == self.u_max.shape == (mj_model.nu + 2,), (
+                "Control vector size mismatch"
+            )
+        else:  # GainOptimizationMode.NONE
             self.nu_total = mj_model.nu
 
         # Timestep for each control step
@@ -170,15 +220,33 @@ class Task(ABC):
         """Extract control and gain components from the extended control vector.
 
         Args:
-            control: The extended control vector [u, p_gains, d_gains]
+            control: The extended control vector based on the gain optimization mode
 
         Returns:
             Tuple of (control_actions, p_gains, d_gains)
         """
-        if self.optimize_gains:
+        if self.gain_mode == GainOptimizationMode.NONE:
+            return control, None, None
+
+        elif self.gain_mode == GainOptimizationMode.INDIVIDUAL:
             u = control[: self.nu_ctrl]
             p_gains = control[self.nu_ctrl : 2 * self.nu_ctrl]
             d_gains = control[2 * self.nu_ctrl : 3 * self.nu_ctrl]
             return u, p_gains, d_gains
-        else:
-            return control, None, None
+
+        elif self.gain_mode == GainOptimizationMode.SIMPLE:
+            # Assert that the control vector is of the correct length 6
+            assert self.nu_ctrl == 6, (
+                "Control vector length must be 6 for SIMPLE gain optimization"
+            )
+
+            u = control[: self.nu_ctrl]
+            trans_p_gain = control[self.nu_ctrl + 1] * jnp.ones(self.nu_ctrl // 2)
+            rot_p_gain = control[self.nu_ctrl + 2] * jnp.ones(self.nu_ctrl // 2)
+
+            p_gains = jnp.concatenate([trans_p_gain, rot_p_gain])
+
+            # Calculate d_gains as 2*sqrt(p_gain)
+            d_gains = 2.0 * jnp.sqrt(p_gains)
+
+            return u, p_gains, d_gains

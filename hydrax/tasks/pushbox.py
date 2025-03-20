@@ -6,7 +6,7 @@ import mujoco
 from mujoco import mjx
 
 from hydrax import ROOT
-from hydrax.task_base import Task
+from hydrax.task_base import Task, GainOptimizationMode
 
 
 class PushBox(Task):
@@ -16,17 +16,38 @@ class PushBox(Task):
         self,
         planning_horizon: int = 20,
         sim_steps_per_control_step: int = 5,
-        optimize_gains: bool = False,
+        gain_mode: GainOptimizationMode = GainOptimizationMode.NONE,
     ):
-        """Load the MuJoCo model and set task parameters."""
+        """Load the MuJoCo model and set task parameters.
+
+        Args:
+            planning_horizon: The number of control steps (T) to plan over.
+            sim_steps_per_control_step: The number of simulation steps per control step.
+            gain_mode: The gain optimization mode to use (NONE, INDIVIDUAL, or SIMPLE).
+        """
         mj_model = mujoco.MjModel.from_xml_path(ROOT + "/models/pushbox/scene.xml")
+
+        # Define custom gain limits for this task
+        gain_limits = {
+            # INDIVIDUAL mode limits
+            "p_min": 5.0,
+            "p_max": 50.0,
+            "d_min": 1.0,
+            "d_max": 20.0,
+            # SIMPLE mode limits
+            "trans_p_min": 5.0,
+            "trans_p_max": 50.0,
+            "rot_p_min": 5.0,
+            "rot_p_max": 50.0,
+        }
 
         super().__init__(
             mj_model,
             planning_horizon=planning_horizon,
             sim_steps_per_control_step=sim_steps_per_control_step,
             trace_sites=["pusher"],
-            optimize_gains=optimize_gains,
+            gain_mode=gain_mode,
+            gain_limits=gain_limits,
         )
 
         # Get sensor ids

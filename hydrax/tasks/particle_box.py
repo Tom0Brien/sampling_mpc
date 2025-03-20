@@ -6,7 +6,7 @@ import mujoco
 from mujoco import mjx
 
 from hydrax import ROOT
-from hydrax.task_base import Task
+from hydrax.task_base import Task, GainOptimizationMode
 
 
 class ParticleBox(Task):
@@ -16,17 +16,38 @@ class ParticleBox(Task):
         self,
         planning_horizon: int = 5,
         sim_steps_per_control_step: int = 5,
-        optimize_gains: bool = False,
+        gain_mode: GainOptimizationMode = GainOptimizationMode.NONE,
     ):
-        """Load the MuJoCo model and set task parameters."""
+        """Load the MuJoCo model and set task parameters.
+
+        Args:
+            planning_horizon: The number of control steps (T) to plan over.
+            sim_steps_per_control_step: The number of simulation steps per control step.
+            gain_mode: The gain optimization mode to use (NONE, INDIVIDUAL, or SIMPLE).
+        """
         mj_model = mujoco.MjModel.from_xml_path(ROOT + "/models/particle_box/scene.xml")
+
+        # Define custom gain limits for this task
+        gain_limits = {
+            # INDIVIDUAL mode limits
+            "p_min": 1.0,
+            "p_max": 50.0,
+            "d_min": 1.0,
+            "d_max": 50.0,
+            # SIMPLE mode limits
+            "trans_p_min": 1.0,
+            "trans_p_max": 50.0,
+            "rot_p_min": 1.0,
+            "rot_p_max": 50.0,
+        }
 
         super().__init__(
             mj_model,
             planning_horizon=planning_horizon,
             sim_steps_per_control_step=sim_steps_per_control_step,
             trace_sites=["particle", "box_site"],
-            optimize_gains=optimize_gains,
+            gain_mode=gain_mode,
+            gain_limits=gain_limits,
         )
 
         self.particle_id = mj_model.site("particle").id
@@ -43,25 +64,6 @@ class ParticleBox(Task):
         self.safety_margin = jnp.array([0.02, 0.02])  # 2cm margin on each side
         self.safe_area_min_with_margin = self.safe_area_min + self.safety_margin
         self.safe_area_max_with_margin = self.safe_area_max - self.safety_margin
-
-        # Set actuator limits
-        self.u_min = jnp.where(
-            mj_model.actuator_ctrllimited,
-            mj_model.actuator_ctrlrange[:, 0],
-            -jnp.inf,
-        )
-        self.u_max = jnp.where(
-            mj_model.actuator_ctrllimited,
-            mj_model.actuator_ctrlrange[:, 1],
-            jnp.inf,
-        )
-        if optimize_gains:
-            self.p_gain_min = jnp.ones(mj_model.nu) * 1
-            self.p_gain_max = jnp.ones(mj_model.nu) * 50
-            self.d_gain_min = jnp.ones(mj_model.nu) * 1
-            self.d_gain_max = jnp.ones(mj_model.nu) * 50
-            self.u_min = jnp.concatenate([self.u_min, self.p_gain_min, self.d_gain_min])
-            self.u_max = jnp.concatenate([self.u_max, self.p_gain_max, self.d_gain_max])
 
     def _get_box_position(self, state: mjx.Data) -> jax.Array:
         """Get the position of the box."""

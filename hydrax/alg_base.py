@@ -8,7 +8,7 @@ from flax.struct import dataclass
 from mujoco import mjx
 
 from hydrax.risk import AverageCost, RiskStrategy
-from hydrax.task_base import Task
+from hydrax.task_base import Task, GainOptimizationMode
 
 
 @dataclass
@@ -163,7 +163,7 @@ class SamplingBasedController(ABC):
             x = mjx.forward(model, x)  # compute site positions
 
             # Extract control and gains if optimizing gains
-            if self.task.optimize_gains:
+            if self.task.gain_mode != GainOptimizationMode.NONE:
                 ctrl, p_gains, d_gains = self.task.extract_gains(u)
 
                 # Update the actuator gain parameters in the model

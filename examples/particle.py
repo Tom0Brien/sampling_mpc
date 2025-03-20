@@ -6,6 +6,7 @@ import numpy as np
 from hydrax.algs import MPPI, Evosax, PredictiveSampling
 from hydrax.simulation.deterministic import run_interactive
 from hydrax.tasks.particle import Particle
+from hydrax.task_base import GainOptimizationMode
 
 """
 Run an interactive simulation of the particle tracking task.
@@ -20,9 +21,11 @@ def parse_args():
         description="Run an interactive simulation of the particle tracking task."
     )
     parser.add_argument(
-        "--optimize-gains",
-        action="store_true",
-        help="Optimize actuator gains along with control inputs",
+        "--gain-mode",
+        type=str,
+        choices=["none", "individual", "simple"],
+        default="none",
+        help="Gain optimization mode (none, individual, or simple)",
     )
     subparsers = parser.add_subparsers(
         dest="algorithm", help="Sampling algorithm (choose one)"
@@ -43,13 +46,25 @@ def parse_args():
 def main():
     args = parse_args()
 
+    # Map the gain mode string to the enum
+    gain_mode_map = {
+        "none": GainOptimizationMode.NONE,
+        "individual": GainOptimizationMode.INDIVIDUAL,
+        "simple": GainOptimizationMode.SIMPLE,
+    }
+    gain_mode = gain_mode_map[args.gain_mode]
+
     # Define the task (cost and dynamics)
-    task = Particle(optimize_gains=args.optimize_gains)
+    task = Particle(gain_mode=gain_mode)
 
     # Print control dimensions
-    if args.optimize_gains:
+    if gain_mode == GainOptimizationMode.INDIVIDUAL:
         print(
             f"Control dimensions: {task.nu_ctrl} (controls) + {2 * task.nu_ctrl} (gains) = {task.nu_total}"
+        )
+    elif gain_mode == GainOptimizationMode.SIMPLE:
+        print(
+            f"Control dimensions: {task.nu_ctrl} (controls) + 2 (trans/rot p-gains) = {task.nu_total}"
         )
     else:
         print(f"Control dimensions: {task.model.nu}")
@@ -65,13 +80,16 @@ def main():
 
     elif args.algorithm == "mppi":
         print("Running MPPI")
-        if task.optimize_gains:
+        if gain_mode == GainOptimizationMode.INDIVIDUAL:
             ctrl = MPPI(
                 task,
                 num_samples=1000,
                 noise_level=np.array([0.01, 0.01, 1, 1, 1, 1]),
                 temperature=0.001,
             )
+        elif gain_mode == GainOptimizationMode.SIMPLE:
+            # Not supported for this task
+            raise ValueError("Simple gain mode not supported for this task")
         else:
             ctrl = MPPI(task, num_samples=2000, noise_level=0.01, temperature=0.001)
 
