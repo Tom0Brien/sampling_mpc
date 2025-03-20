@@ -156,11 +156,6 @@ mj_data = mujoco.MjData(mj_model)
 # Set the initial joint positions
 mj_data.qpos[:7] = [-0.196, -0.189, 0.182, -2.1, 0.0378, 1.91, 0.756]
 
-# Initialize the controller gains
-for j in range(ctrl.task.nu_ctrl):
-    mj_model.actuator_gainprm[j, 1] = 50
-    mj_model.actuator_gainprm[j, 2] = 20
-
 # Run the interactive simulation
 run_interactive(
     ctrl,
