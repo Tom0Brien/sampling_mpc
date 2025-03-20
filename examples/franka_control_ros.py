@@ -11,6 +11,7 @@ from scipy.spatial.transform import Rotation
 
 from hydrax.algs import MPPI, PredictiveSampling
 from hydrax.tasks.franka_reach import FrankaReach
+from hydrax.tasks.franka_reach import GainOptimizationMode
 
 """
 Control loop for Franka robot using ROS for communication and Hydrax for control.
@@ -21,7 +22,7 @@ actions using a sampling-based controller, and sends commands to the robot.
 
 class FrankaRosControl:
     def __init__(
-        self, host="localhost", port=9090, controller_type="ps", optimize_gains=False
+        self, host="localhost", port=9090, controller_type="ps", gain_mode="none"
     ):
         # ROS connection
         self.client = roslibpy.Ros(host=host, port=port)
@@ -42,6 +43,25 @@ class FrankaRosControl:
         )
         self.cartesian_pose_pub.advertise()
 
+        # Replace the publisher with a service client for dynamic reconfigure
+        self.compliance_param_client = roslibpy.Service(
+            self.client,
+            "/cartesian_impedance_example_controller/dynamic_reconfigure_compliance_param_node/set_parameters",
+            "dynamic_reconfigure/Reconfigure",
+        )
+
+        # Initial stiffness/damping values (similar to C++ example defaults)
+        self.translational_stiffness = 50.0  # N/m
+        self.rotational_stiffness = 20.0  # Nm/rad
+        self.nullspace_stiffness = 1.0
+
+        # Send initial compliance parameters
+        self.update_compliance_params(
+            self.translational_stiffness,
+            self.rotational_stiffness,
+            self.nullspace_stiffness,
+        )
+
         # Wait for publishers to be ready
         time.sleep(1.0)
 
@@ -50,8 +70,16 @@ class FrankaRosControl:
         self.current_joint_velocities = None
         self.current_end_effector_pose = None
 
+        # Map gain_mode string to GainOptimizationMode enum
+        gain_mode_map = {
+            "none": GainOptimizationMode.NONE,
+            "individual": GainOptimizationMode.INDIVIDUAL,
+            "simple": GainOptimizationMode.SIMPLE,
+        }
+        gain_mode_enum = gain_mode_map.get(gain_mode, GainOptimizationMode.NONE)
+
         # Initialize the Hydrax task and controller
-        self.task = FrankaReach(optimize_gains=optimize_gains)
+        self.task = FrankaReach(gain_mode=gain_mode_enum)
         self.mj_model = self.task.mj_model
         self.mj_data = mujoco.MjData(self.mj_model)
         self.mjx_data = mjx.put_data(self.mj_model, self.mj_data)
@@ -73,11 +101,11 @@ class FrankaRosControl:
         elif controller_type == "mppi":
             print("Using MPPI controller")
             noise_level = 0.01
-            if optimize_gains:
+            if gain_mode_enum == GainOptimizationMode.SIMPLE:
                 # Set noise levels for position, orientation, and gains
                 noise_level = np.array(
-                    [0.01] * 6 + [1.0] * 12
-                )  # 6 pose params + 12 gain params
+                    [0.01] * 6 + [1] + [1]
+                )  # 6 pose params + 2 gain params
 
             self.controller = MPPI(
                 self.task,
@@ -128,6 +156,52 @@ class FrankaRosControl:
         self.mj_data.qpos = np.array(self.current_joint_positions)
         self.mj_data.qvel = np.array(self.current_joint_velocities)
         mujoco.mj_forward(self.mj_model, self.mj_data)
+
+    def update_compliance_params(
+        self, translational_stiffness, rotational_stiffness, nullspace_stiffness=10.0
+    ):
+        """
+        Send an update to the compliance parameters of the cartesian impedance controller
+        using the dynamic reconfigure service
+        """
+        # Create a dynamic_reconfigure/Reconfigure service request
+        request = {
+            "config": {
+                "bools": [],
+                "ints": [],
+                "strs": [],
+                "doubles": [
+                    {
+                        "name": "translational_stiffness",
+                        "value": float(translational_stiffness),
+                    },
+                    {
+                        "name": "rotational_stiffness",
+                        "value": float(rotational_stiffness),
+                    },
+                    {
+                        "name": "nullspace_stiffness",
+                        "value": float(nullspace_stiffness),
+                    },
+                ],
+                "groups": [],
+            }
+        }
+
+        print(
+            f"Calling service to update compliance params: trans={translational_stiffness}, rot={rotational_stiffness}"
+        )
+
+        # Call the service
+        self.compliance_param_client.call(request, self.compliance_service_callback)
+
+    def compliance_service_callback(self, result):
+        """Callback for the compliance parameter service call"""
+        if "config" in result:
+            print("Successfully updated compliance parameters")
+            # You could parse and print the returned values here
+        else:
+            print("Failed to update compliance parameters:", result)
 
     def send_cartesian_command(self, pose):
         """
@@ -239,15 +313,16 @@ class FrankaRosControl:
                 action = self.get_action(self.policy_params, t)
 
                 # Handle the case where the action includes gains
-                if self.task.optimize_gains:
+                if self.task.gain_mode == GainOptimizationMode.SIMPLE:
                     # Extract control and gains
-                    pose_command, p_gains, d_gains = self.task.extract_gains(action)
-                    print(
-                        f"Sending pose: {pose_command}, P-gains: {p_gains}, D-gains: {d_gains}"
-                    )
+                    pose_command, _, _ = self.task.extract_gains(action)
+                    print(f"Sending pose: {pose_command}")
                     self.send_cartesian_command(pose_command)
-                    # Note: You might want to send the gains to a separate ROS topic if your
-                    # controller supports dynamic gain adjustment
+
+                    # Update the compliance parameters
+                    trans_p_gain = action[self.task.nu_ctrl + 1]
+                    rot_p_gain = action[self.task.nu_ctrl + 2]
+                    self.update_compliance_params(trans_p_gain, rot_p_gain)
                 else:
                     # Action is directly the pose command
                     pose_command = action
@@ -346,9 +421,11 @@ def main():
         help="Controller type (ps for Predictive Sampling, mppi for MPPI)",
     )
     parser.add_argument(
-        "--optimize-gains",
-        action="store_true",
-        help="Optimize controller gains along with poses",
+        "--gain-mode",
+        type=str,
+        choices=["none", "individual", "simple"],
+        default="none",
+        help="Gain optimization mode (none, individual, or simple)",
     )
     parser.add_argument(
         "--enable-viewer",
@@ -369,7 +446,7 @@ def main():
         host=args.host,
         port=args.port,
         controller_type=args.controller,
-        optimize_gains=args.optimize_gains,
+        gain_mode=args.gain_mode,
     )
 
     controller.run_control_loop(
