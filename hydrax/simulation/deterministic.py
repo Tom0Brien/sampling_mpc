@@ -88,10 +88,6 @@ def run_interactive(
         mocap_pos=mj_data.mocap_pos, mocap_quat=mj_data.mocap_quat
     )
     policy_params = controller.init_params()
-    # Set the mean of the policy to the initial control in data for whole horizon
-    policy_params.replace(
-        mean=jnp.tile(mj_data.ctrl, (controller.task.planning_horizon, 1))
-    )
     jit_optimize = jax.jit(controller.optimize, donate_argnums=(1,))
 
     # Warm-up the controller
