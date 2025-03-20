@@ -8,6 +8,7 @@ from hydrax.algs import MPPI, Evosax, PredictiveSampling
 from hydrax.simulation.deterministic import run_interactive
 from hydrax.tasks.particle_box import ParticleBox
 from hydrax.task_base import GainOptimizationMode
+from parse_args import parse_args
 
 """
 Run an interactive simulation of the particle with box constraint task.
@@ -15,34 +16,6 @@ Run an interactive simulation of the particle with box constraint task.
 Double click on the green target, then drag it around with [ctrl + right-click].
 The particle (red) should reach the target while keeping the box (orange) within the blue safe area.
 """
-
-
-# Parse command-line arguments
-def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Run an interactive simulation of the particle with box constraint task."
-    )
-    parser.add_argument(
-        "--gain-mode",
-        type=str,
-        choices=["none", "individual", "simple"],
-        default="none",
-        help="Gain optimization mode (none, individual, or simple)",
-    )
-    subparsers = parser.add_subparsers(
-        dest="algorithm", help="Sampling algorithm (choose one)"
-    )
-    subparsers.add_parser("ps", help="Predictive Sampling")
-    subparsers.add_parser("mppi", help="Model Predictive Path Integral Control")
-    subparsers.add_parser("cmaes", help="CMA-ES")
-    subparsers.add_parser(
-        "samr", help="Genetic Algorithm with Self-Adaptation Mutation Rate (SAMR)"
-    )
-    subparsers.add_parser("de", help="Differential Evolution")
-    subparsers.add_parser("gld", help="Gradient-Less Descent")
-    subparsers.add_parser("rs", help="Uniform Random Search")
-    subparsers.add_parser("diffusion", help="Diffusion")
-    return parser.parse_args()
 
 
 def main():
