@@ -15,3 +15,6 @@ MJDATA.TXT
 recordings/*
 !recordings/.gitkeep
 build
+sys_id/collected_data/*
+sys_id/results/*
+sys_id/plots/*
