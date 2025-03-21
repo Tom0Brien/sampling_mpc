@@ -160,7 +160,7 @@ def main():
     mj_data = mujoco.MjData(mj_model)
 
     # Set the initial joint positions
-    mj_data.qpos[: mj_model.nu] = [
+    mj_data.qpos[:9] = [
         -0.196,
         -0.189,
         0.182,

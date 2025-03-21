@@ -81,8 +81,8 @@ class FrankaPush(Task):
         box_rot = state.xmat[self.box_id].reshape((3, 3))
         box_quat = mat_to_quat(box_rot)
         box_pos_cost = jnp.sum(jnp.square(current_box_pos - desired_box_pos))
-        box_orientation_cost = orientation_error(
-            box_quat, desired_box_orientation, box_rot
+        box_orientation_cost = jnp.sum(
+            jnp.square(orientation_error(box_quat, desired_box_orientation, box_rot))
         )
 
         # Desired gripper position: 5cm back from box along box-to-goal line
@@ -106,7 +106,7 @@ class FrankaPush(Task):
 
         return (
             100.0 * box_pos_cost  # Box position
-            + 0.0 * box_orientation_cost  # Box orientation
+            + 10.0 * box_orientation_cost  # Box orientation
             + 40.0 * box_to_gripper_cost  # Close to box cost
             + 0 * gripper_orientation_cost  # Gripper orientation
         )
