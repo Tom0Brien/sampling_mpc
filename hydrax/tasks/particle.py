@@ -6,7 +6,7 @@ import mujoco
 from mujoco import mjx
 
 from hydrax import ROOT
-from hydrax.task_base import Task, GainOptimizationMode
+from hydrax.task_base import Task, ControlMode
 
 
 class Particle(Task):
@@ -16,7 +16,7 @@ class Particle(Task):
         self,
         planning_horizon: int = 5,
         sim_steps_per_control_step: int = 5,
-        gain_mode: GainOptimizationMode = GainOptimizationMode.NONE,
+        control_mode: ControlMode = ControlMode.GENERAL,
     ):
         """Load the MuJoCo model and set task parameters."""
         mj_model = mujoco.MjModel.from_xml_path(ROOT + "/models/particle/scene.xml")
@@ -38,7 +38,7 @@ class Particle(Task):
             planning_horizon=planning_horizon,
             sim_steps_per_control_step=sim_steps_per_control_step,
             trace_sites=["particle"],
-            gain_mode=gain_mode,
+            control_mode=control_mode,
             gain_limits=gain_limits,
         )
 

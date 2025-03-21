@@ -3,12 +3,13 @@ import argparse
 import evosax
 import mujoco
 import numpy as np
+import jax.numpy as jnp
 
 from hydrax.algs import MPPI, Evosax, PredictiveSampling
 from hydrax.simulation.deterministic import run_interactive
 from hydrax.tasks.franka_push import FrankaPush
-from hydrax.task_base import GainOptimizationMode
-from parse_args import parse_args
+from hydrax.task_base import ControlMode
+from parse_args import parse_args, control_mode_map
 
 """
 Run an interactive simulation of the box pushing task.
@@ -20,28 +21,16 @@ Double click on the green target to move the goal position.
 def main():
     args = parse_args()
 
-    # Map the gain mode string to the enum
-    gain_mode_map = {
-        "none": GainOptimizationMode.NONE,
-        "individual": GainOptimizationMode.INDIVIDUAL,
-        "simple": GainOptimizationMode.SIMPLE,
-    }
-    gain_mode = gain_mode_map[args.gain_mode]
+    # Map the control mode string to the enum
+    control_mode = control_mode_map[args.control_mode]
 
     # Define the task (cost and dynamics)
-    task = FrankaPush(gain_mode=gain_mode)
+    task = FrankaPush(control_mode=control_mode)
 
-    # Print control dimensions
-    if gain_mode == GainOptimizationMode.INDIVIDUAL:
-        print(
-            f"Control dimensions: {task.nu_ctrl} (controls) + {2 * task.nu_ctrl} (gains) = {task.nu_total}"
-        )
-    elif gain_mode == GainOptimizationMode.SIMPLE:
-        print(
-            f"Control dimensions: {task.nu_ctrl} (controls) + 2 (trans/rot p-gains) = {task.nu_total}"
-        )
-    else:
-        print(f"Control dimensions: {task.model.nu}")
+    print(f"Control mode: {control_mode}")
+    print(
+        f"Control dimensions: {task.nu_ctrl} (controls) + {task.nu_total - task.nu_ctrl} (gains) = {task.nu_total}"
+    )
 
     # Set the controller based on command-line arguments
     if args.algorithm == "ps" or args.algorithm is None:
@@ -54,7 +43,7 @@ def main():
 
     elif args.algorithm == "mppi":
         print("Running MPPI")
-        if gain_mode == GainOptimizationMode.INDIVIDUAL:
+        if control_mode == ControlMode.GENERAL_VARIABLE_IMPEDANCE:
             # Individual gain optimization (6 controls + 12 gains)
             ctrl = MPPI(
                 task,
@@ -83,7 +72,7 @@ def main():
                 ),
                 temperature=0.001,
             )
-        elif gain_mode == GainOptimizationMode.SIMPLE:
+        elif control_mode == ControlMode.CARTESIAN_SIMPLE_VARIABLE_IMPEDANCE:
             # Simple gain optimization (6 controls + 2 gains)
             ctrl = MPPI(
                 task,
@@ -108,9 +97,9 @@ def main():
                 num_samples=1000,
                 noise_level=np.array(
                     [
-                        0.01,  # x reference noise level
-                        0.01,  # y reference noise level
-                        0.01,  # z reference noise level
+                        0.05,  # x reference noise level
+                        0.05,  # y reference noise level
+                        0.05,  # z reference noise level
                         0.01,  # roll reference noise level
                         0.01,  # pitch reference noise level
                         0.01,  # yaw reference noise level
@@ -171,7 +160,39 @@ def main():
     mj_data = mujoco.MjData(mj_model)
 
     # Set the initial joint positions
-    mj_data.qpos[:7] = [-0.196, -0.189, 0.182, -2.1, 0.0378, 1.91, 0.756]
+    mj_data.qpos[: mj_model.nu] = [
+        -0.196,
+        -0.189,
+        0.182,
+        -2.1,
+        0.0378,
+        1.91,
+        0.756,
+        0,
+        0,
+    ]
+
+    # Define the initial control (tile to planning horizon) if needed
+    initial_control = None
+    if control_mode == ControlMode.CARTESIAN or control_mode == ControlMode.GENERAL:
+        initial_control = jnp.tile(
+            jnp.array(
+                [
+                    0.5,  # x reference
+                    0.0,  # y reference
+                    0.4,  # z reference
+                    -3.14,  # roll reference
+                    0.0,  # pitch reference
+                    0.0,  # yaw reference
+                ]
+            ),
+            (task.planning_horizon, 1),
+        )
+    elif control_mode == ControlMode.CARTESIAN_SIMPLE_VARIABLE_IMPEDANCE:
+        initial_control = jnp.tile(
+            jnp.array([0.5, 0.0, 0.4, -3.14, 0.0, 0.0, 300, 50]),
+            (task.planning_horizon, 1),
+        )
 
     # Run the interactive simulation
     run_interactive(
@@ -186,6 +207,7 @@ def main():
         record_video=True,
         show_debug_info=True,
         plot_costs=True,
+        initial_control=initial_control,
     )
 
 

@@ -11,7 +11,8 @@ import mediapy as media
 import matplotlib.pyplot as plt
 
 from hydrax.alg_base import SamplingBasedController
-from hydrax.task_base import GainOptimizationMode
+from hydrax.task_base import ControlMode
+from hydrax.controllers.impedance_controllers import impedance_control
 
 """
 Tools for deterministic (synchronous) simulation, with the simulator and
@@ -36,6 +37,7 @@ def run_interactive(
     keyboard_control: bool = True,
     keyboard_step_size: float = 0.01,
     mocap_index: int = 0,
+    initial_control: jax.Array = None,
 ) -> None:
     """Run an interactive simulation with the MPC controller.
 
@@ -88,7 +90,8 @@ def run_interactive(
     mjx_data = mjx_data.replace(
         mocap_pos=mj_data.mocap_pos, mocap_quat=mj_data.mocap_quat
     )
-    policy_params = controller.init_params()
+    # If initial control is provided, use it to initialize the policy parameters
+    policy_params = controller.init_params(initial_control=initial_control)
     jit_optimize = jax.jit(controller.optimize, donate_argnums=(1,))
 
     # Warm-up the controller
@@ -203,7 +206,17 @@ def run_interactive(
                 cost_history.append(total_cost)
 
                 # Centralized handling of control and gain information
-                if controller.task.gain_mode != GainOptimizationMode.NONE:
+                if controller.task.control_mode == ControlMode.GENERAL:
+                    # Apply control directly
+                    mj_data.ctrl[:] = np.array(u)
+
+                    # Store history
+                    control_history.append(np.array(u))
+
+                elif (
+                    controller.task.control_mode
+                    == ControlMode.GENERAL_VARIABLE_IMPEDANCE
+                ):
                     # Extract control and gains
                     ctrl, p_gains, d_gains = controller.task.extract_gains(u)
                     # Update the actuator gain parameters in the model
@@ -219,63 +232,51 @@ def run_interactive(
                     control_history.append(np.array(ctrl))
                     p_gain_history.append(np.array(p_gains))
                     d_gain_history.append(np.array(d_gains))
+                elif controller.task.control_mode == ControlMode.CARTESIAN:
+                    # Compute the impedance control
+                    Kp = jnp.diag(jnp.array([300, 300, 300, 50, 50, 50], dtype=float))
+                    Kd = 2.0 * jnp.sqrt(Kp)
+                    tau = impedance_control(
+                        mj_model,
+                        mj_data,
+                        u[:3],
+                        u[3:],
+                        Kp,
+                        Kd,
+                        1.0,
+                        controller.task.q_d_nullspace,
+                        controller.task.ee_site_id,
+                    )
 
-                    # Show debug information if enabled
-                    if show_debug_info:
-                        # Format gain text based on gain mode
-                        if controller.task.gain_mode == GainOptimizationMode.SIMPLE:
-                            trans_p_gain = u[controller.task.nu_ctrl]
-                            rot_p_gain = u[controller.task.nu_ctrl + 1]
-                            trans_d_gain = 2.0 * np.sqrt(trans_p_gain)
-                            rot_d_gain = 2.0 * np.sqrt(rot_p_gain)
-
-                            p_gain_text = f"Trans P-gain: {trans_p_gain:.2f}, Rot P-gain: {rot_p_gain:.2f}"
-                            d_gain_text = f"Trans D-gain: {trans_d_gain:.2f}, Rot D-gain: {rot_d_gain:.2f}"
-                        else:
-                            p_gain_text = (
-                                "P-gains: ["
-                                + ", ".join([f"{g:.2f}" for g in p_gains])
-                                + "]"
-                            )
-                            d_gain_text = (
-                                "D-gains: ["
-                                + ", ".join([f"{g:.2f}" for g in d_gains])
-                                + "]"
-                            )
-
-                        # Add P-gain text (positioned below cost text)
-                        geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
-                        mujoco.mjv_initGeom(
-                            geom,
-                            type=mujoco.mjtGeom.mjGEOM_LABEL,
-                            size=np.array([0.15, 0.15, 0.15]),
-                            pos=cost_pos
-                            - np.array([0.0, 0.0, 0.05]),  # position below cost
-                            mat=np.eye(3).flatten(),
-                            rgba=np.array([0.8, 0.8, 1.0, 1]),  # light blue text
-                        )
-                        geom.label = p_gain_text
-                        viewer.user_scn.ngeom += 1
-
-                        # Add D-gain text (positioned below P-gain text)
-                        geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
-                        mujoco.mjv_initGeom(
-                            geom,
-                            type=mujoco.mjtGeom.mjGEOM_LABEL,
-                            size=np.array([0.15, 0.15, 0.15]),
-                            pos=cost_pos
-                            - np.array([0.0, 0.0, 0.1]),  # position below P-gain
-                            mat=np.eye(3).flatten(),
-                            rgba=np.array([0.8, 1.0, 0.8, 1]),  # light green text
-                        )
-                        geom.label = d_gain_text
-                        viewer.user_scn.ngeom += 1
-                else:
                     # Apply control directly
-                    mj_data.ctrl[:] = np.array(u)
+                    mj_data.ctrl[:] = np.array(tau[: mj_model.nu])
 
                     # Store history
                     control_history.append(np.array(u))
+                elif (
+                    controller.task.control_mode
+                    == ControlMode.CARTESIAN_SIMPLE_VARIABLE_IMPEDANCE
+                ):
+                    # Extract control and gains
+                    ctrl, p_gains, d_gains = controller.task.extract_gains(u)
+                    # Apply control
+                    tau = impedance_control(
+                        mj_model,
+                        mj_data,
+                        ctrl[:3],
+                        ctrl[3:],
+                        p_gains * jnp.identity(6),
+                        d_gains * jnp.identity(6),
+                        0.0,
+                        controller.task.q_d_nullspace,
+                        controller.task.ee_site_id,
+                    )
+
+                    # Apply control directly
+                    mj_data.ctrl[:] = np.array(tau)
+
+                    # Store history
+                    control_history.append(np.array(ctrl))
 
                 # Visualize reference position if debug info is enabled
                 if show_debug_info:
@@ -344,7 +345,14 @@ def run_interactive(
             # Create figure with multiple subplots
             fig, axes = plt.subplots(
                 1
-                + (2 if controller.task.gain_mode != GainOptimizationMode.NONE else 0)
+                + (
+                    2
+                    if (
+                        controller.task.control_mode != ControlMode.GENERAL
+                        or controller.task.control_mode != ControlMode.CARTESIAN
+                    )
+                    else 0
+                )
                 + 1,
                 1,
                 figsize=(10, 10),
@@ -352,7 +360,7 @@ def run_interactive(
             )
 
             # If not optimizing gains, axes is not a list, so make it one for consistency
-            if controller.task.gain_mode == GainOptimizationMode.NONE:
+            if controller.task.control_mode == ControlMode.GENERAL:
                 axes = [axes] if not isinstance(axes, np.ndarray) else axes
 
             # Plot cost history
@@ -363,7 +371,7 @@ def run_interactive(
 
             # Plot gain histories if optimizing gains
             if (
-                controller.task.gain_mode != GainOptimizationMode.NONE
+                controller.task.control_mode != ControlMode.GENERAL
                 and p_gain_history
                 and d_gain_history
             ):

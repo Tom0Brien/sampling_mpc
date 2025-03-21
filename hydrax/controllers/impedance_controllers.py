@@ -57,15 +57,15 @@ def impedance_control_mjx(
     tau_task = J.T @ F_ee_des
 
     # Nullspace control
-    Jt_pinv = pseudo_inverse(J.T)
-    proj = jnp.eye(model_mjx.nv) - (J.T @ Jt_pinv)
-    dn = 2.0 * jnp.sqrt(nullspace_stiffness)
-    tau_null = proj @ (nullspace_stiffness * (q_d_nullspace - q) - dn * dq)
+    # Jt_pinv = pseudo_inverse(J.T)
+    # proj = jnp.eye(model_mjx.nv) - (J.T @ Jt_pinv)
+    # dn = 2.0 * jnp.sqrt(nullspace_stiffness)
+    # tau_null = proj @ (nullspace_stiffness * (q_d_nullspace - q) - dn * dq)
 
     # Coriolis Compensation (no gravity compensation in Franka example)
     tau_cor = data_mjx.qfrc_bias - data_mjx.qfrc_gravcomp
 
-    return tau_task + tau_cor + tau_null
+    return tau_task + tau_cor  # + tau_null
 
 
 def impedance_control(
@@ -99,12 +99,12 @@ def impedance_control(
     tau_task = J.T @ F_ee_des
 
     # Nullspace control
-    Jt_pinv = pseudo_inverse(J.T)
-    proj = jnp.eye(model.nv) - (J.T @ Jt_pinv)
-    dn = 2.0 * jnp.sqrt(nullspace_stiffness)
-    tau_null = proj @ (nullspace_stiffness * (q_d_nullspace - q) - dn * dq)
+    # Jt_pinv = pseudo_inverse(J.T)
+    # proj = jnp.eye(model.nv) - (J.T @ Jt_pinv)
+    # dn = 2.0 * jnp.sqrt(nullspace_stiffness)
+    # tau_null = proj @ (nullspace_stiffness * (q_d_nullspace - q) - dn * dq)
 
     # Coriolis Compensation (no gravity compensation in Franka example)
     mujoco.mj_inverse(model, data)
     tau_cor = jnp.array(data.qfrc_bias) - jnp.array(data.qfrc_gravcomp)
-    return tau_task + tau_cor + tau_null
+    return tau_task + tau_cor  # + tau_null

@@ -8,7 +8,8 @@ from flax.struct import dataclass
 from mujoco import mjx
 
 from hydrax.risk import AverageCost, RiskStrategy
-from hydrax.task_base import Task, GainOptimizationMode
+from hydrax.task_base import Task, ControlMode
+from hydrax.controllers.impedance_controllers import impedance_control_mjx
 
 
 @dataclass
@@ -163,7 +164,18 @@ class SamplingBasedController(ABC):
             x = mjx.forward(model, x)  # compute site positions
 
             # Extract control and gains if optimizing gains
-            if self.task.gain_mode != GainOptimizationMode.NONE:
+            if self.task.control_mode == ControlMode.GENERAL:
+                cost = self.task.dt * self.task.running_cost(x, u)
+                sites = self.task.get_trace_sites(x)
+
+                # Advance the state for several steps, zero-order hold on control
+                x = jax.lax.fori_loop(
+                    0,
+                    self.task.sim_steps_per_control_step,
+                    lambda _, x: mjx.step(model, x),
+                    x.replace(ctrl=u),
+                )
+            elif self.task.control_mode == ControlMode.GENERAL_VARIABLE_IMPEDANCE:
                 ctrl, p_gains, d_gains = self.task.extract_gains(u)
 
                 # Update the actuator gain parameters in the model
@@ -177,8 +189,6 @@ class SamplingBasedController(ABC):
                     .at[: self.task.nu_ctrl, 2]
                     .set(-d_gains)
                 )
-
-                # Update model in one step
                 updated_model = updated_model.replace(
                     actuator_gainprm=updated_gainprm, actuator_biasprm=updated_biasprm
                 )
@@ -193,17 +203,62 @@ class SamplingBasedController(ABC):
                     lambda _, x: mjx.step(updated_model, x),
                     x.replace(ctrl=ctrl),
                 )
-            else:
+            elif self.task.control_mode == ControlMode.CARTESIAN:
+                Kp = jnp.diag(jnp.array([300, 300, 300, 50, 50, 50], dtype=float))
+                Kd = 2.0 * jnp.sqrt(Kp)
+                tau = impedance_control_mjx(
+                    model,
+                    x,
+                    u[:3],
+                    u[3:],
+                    Kp,
+                    Kd,
+                    1.0,
+                    self.task.q_d_nullspace,
+                    self.task.ee_site_id,
+                )
+
                 cost = self.task.dt * self.task.running_cost(x, u)
                 sites = self.task.get_trace_sites(x)
 
-                # Advance the state for several steps, zero-order hold on control
+                # Advance the state
                 x = jax.lax.fori_loop(
                     0,
                     self.task.sim_steps_per_control_step,
                     lambda _, x: mjx.step(model, x),
-                    x.replace(ctrl=u),
+                    x.replace(ctrl=tau[: model.nu]),
                 )
+
+            elif (
+                self.task.control_mode == ControlMode.CARTESIAN_VARIABLE_IMPEDANCE
+                or self.task.control_mode
+                == ControlMode.CARTESIAN_SIMPLE_VARIABLE_IMPEDANCE
+            ):
+                ctrl, p_gain, d_gain = self.task.extract_gains(u)
+                tau = impedance_control_mjx(
+                    model,
+                    x,
+                    ctrl[:3],
+                    ctrl[3:],
+                    p_gain * jnp.identity(self.task.nu_ctrl),
+                    d_gain * jnp.identity(self.task.nu_ctrl),
+                    1.0,
+                    self.task.q_d_nullspace,
+                    self.task.ee_site_id,
+                )
+                cost = self.task.dt * self.task.running_cost(x, u)
+                sites = self.task.get_trace_sites(x)
+
+                # Advance the state
+                x = jax.lax.fori_loop(
+                    0,
+                    self.task.sim_steps_per_control_step,
+                    lambda _, x: mjx.step(model, x),
+                    x.replace(ctrl=tau),
+                )
+            else:
+                # Error if control mode is not supported
+                raise ValueError(f"Control mode {self.task.control_mode} not supported")
 
             return x, (x, cost, sites)
 

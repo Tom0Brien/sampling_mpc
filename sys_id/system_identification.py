@@ -12,8 +12,9 @@ import jax.numpy as jnp
 from mujoco import mjx
 
 from hydrax.tasks.franka_reach import FrankaReach
-from hydrax.task_base import GainOptimizationMode
+from hydrax.task_base import ControlMode
 from hydrax import ROOT
+from hydrax.controllers.impedance_controllers import impedance_control
 
 
 class FrankaMujocoSimulator:
@@ -27,7 +28,9 @@ class FrankaMujocoSimulator:
                         FrankaReach model.
         """
         # Create a FrankaReach task to get the model
-        self.task = FrankaReach(gain_mode=GainOptimizationMode.SIMPLE)
+        self.task = FrankaReach(
+            control_mode=ControlMode.CARTESIAN_SIMPLE_VARIABLE_IMPEDANCE
+        )
         self.mj_model = self.task.mj_model
 
         # Keep a copy of the original model parameters that we will modify
@@ -116,22 +119,22 @@ class FrankaMujocoSimulator:
             controller_params["translational_stiffness"] * trans_gain_scaling
         )
         rot_stiffness = controller_params["rotational_stiffness"] * rot_gain_scaling
+        nullspace_stiffness = controller_params.get("nullspace_stiffness", 0.0)
 
-        # Calculate corresponding damping from stiffness (critical damping assumption)
-        trans_damping = 2.0 * np.sqrt(trans_stiffness)  # Critical damping
-        rot_damping = 2.0 * np.sqrt(rot_stiffness)  # Critical damping
+        # Create gain matrices (diagonal matrices with stiffness values)
+        Kp = np.zeros(6)
+        Kp[:3] = trans_stiffness  # Translational stiffness for x, y, z
+        Kp[3:] = rot_stiffness  # Rotational stiffness for roll, pitch, yaw
 
-        # Update controller gains in the model
-        # For each cartesian DoF, set the appropriate gain
-        for i in range(3):  # x, y, z translation
-            model.actuator_gainprm[i, 1] = trans_stiffness  # Kp
-            model.actuator_biasprm[i, 1] = -trans_stiffness  # Kp
-            model.actuator_biasprm[i, 2] = -trans_damping  # Kv
+        # Critical damping: Kd = 2 * sqrt(Kp)
+        Kd = 2.0 * np.sqrt(Kp)
 
-        for i in range(3, 6):  # roll, pitch, yaw rotation
-            model.actuator_gainprm[i, 1] = rot_stiffness  # Kp
-            model.actuator_biasprm[i, 1] = -rot_stiffness  # Kp
-            model.actuator_biasprm[i, 2] = -rot_damping  # Kv
+        # Use diagonal matrices for Kp and Kd
+        Kp_diag = np.diag(Kp)
+        Kd_diag = np.diag(Kd)
+
+        # Default desired nullspace configuration (home position)
+        q_d_nullspace = np.array([0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785, 0, 0])
 
         # Determine the time step and number of steps
         timestep = model.opt.timestep
@@ -145,6 +148,9 @@ class FrankaMujocoSimulator:
         joint_positions = []
         joint_velocities = []
         simulated_ee_poses = []
+
+        # Get the end-effector site ID
+        ee_site_id = model.site("gripper").id
 
         # Run the simulation
         for i in range(n_steps):
@@ -166,9 +172,21 @@ class FrankaMujocoSimulator:
             Rrg = Rbr.T @ Rbg
             rpy = Rotation.from_matrix(Rrg).as_euler("xyz")
 
-            # Set the target pose in the controller
-            data.ctrl[:3] = rGRr
-            data.ctrl[3:6] = rpy
+            # Calculate impedance control torques using new function
+            tau = impedance_control(
+                model,
+                data,
+                rGRr,  # desired position
+                rpy,  # desired orientation
+                Kp_diag,  # stiffness matrix
+                Kd_diag,  # damping matrix
+                nullspace_stiffness,
+                q_d_nullspace,
+                ee_site_id,
+            )
+
+            # Apply the control torques
+            data.ctrl[:] = tau
 
             # Step the simulation
             mujoco.mj_step(model, data)
@@ -179,7 +197,6 @@ class FrankaMujocoSimulator:
                 mujoco.mj_kinematics(model, data)
 
                 # Get end-effector site position and orientation
-                ee_site_id = model.site("gripper").id
                 ee_pos = data.site_xpos[ee_site_id].copy()
                 ee_ori_mat = data.site_xmat[ee_site_id].reshape(3, 3)
                 ee_quat = Rotation.from_matrix(ee_ori_mat).as_quat()

@@ -1,17 +1,33 @@
 import argparse
 
+from hydrax.task_base import ControlMode
+
+control_mode_map = {
+    "general": ControlMode.GENERAL,
+    "cartesian": ControlMode.CARTESIAN,
+    "general_variable_impedance": ControlMode.GENERAL_VARIABLE_IMPEDANCE,
+    "cartesian_variable_impedance": ControlMode.CARTESIAN_VARIABLE_IMPEDANCE,
+    "cartesian_simple_variable_impedance": ControlMode.CARTESIAN_SIMPLE_VARIABLE_IMPEDANCE,
+}
+
 
 # Parse command-line arguments
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Run an interactive simulation of the push-T task."
+        description="Run an interactive simulation of the task."
     )
     parser.add_argument(
-        "--gain-mode",
+        "--control-mode",
         type=str,
-        choices=["none", "individual", "simple"],
+        choices=[
+            "general",
+            "cartesian",
+            "general_variable_impedance",
+            "cartesian_variable_impedance",
+            "cartesian_simple_variable_impedance",
+        ],
         default="none",
-        help="Gain optimization mode (none, individual, or simple)",
+        help="Control mode (none, general, cartesian, general_variable_impedance, cartesian_variable_impedance, cartesian_simple_variable_impedance)",
     )
     subparsers = parser.add_subparsers(
         dest="algorithm", help="Sampling algorithm (choose one)"

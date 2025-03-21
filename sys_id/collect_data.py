@@ -345,13 +345,13 @@ def main():
     parser.add_argument(
         "--trans-stiffness",
         type=float,
-        default=200.0,
+        default=300.0,
         help="Translational stiffness for the cartesian impedance controller",
     )
     parser.add_argument(
         "--rot-stiffness",
         type=float,
-        default=10.0,
+        default=50.0,
         help="Rotational stiffness for the cartesian impedance controller",
     )
     parser.add_argument(
