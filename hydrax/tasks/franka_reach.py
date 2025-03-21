@@ -40,8 +40,8 @@ class FrankaReach(Task):
             "d_min": 5.0,
             "d_max": 20.0,
             # SIMPLE mode limits
-            "trans_p_min": 15.0,
-            "trans_p_max": 30.0,
+            "trans_p_min": 90.0,
+            "trans_p_max": 110.0,
             "rot_p_min": 15.0,
             "rot_p_max": 30.0,
         }

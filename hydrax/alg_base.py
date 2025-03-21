@@ -168,13 +168,20 @@ class SamplingBasedController(ABC):
 
                 # Update the actuator gain parameters in the model
                 updated_model = model
-                for i in range(self.task.nu_ctrl):
-                    updated_model = updated_model.replace(
-                        actuator_gainprm=updated_model.actuator_gainprm.at[i, 1]
-                        .set(p_gains[i])
-                        .at[i, 2]
-                        .set(d_gains[i])
-                    )
+                updated_gainprm = updated_model.actuator_gainprm.at[
+                    : self.task.nu_ctrl, 0
+                ].set(p_gains)
+                updated_biasprm = (
+                    updated_model.actuator_biasprm.at[: self.task.nu_ctrl, 1]
+                    .set(-p_gains)
+                    .at[: self.task.nu_ctrl, 2]
+                    .set(-d_gains)
+                )
+
+                # Update model in one step
+                updated_model = updated_model.replace(
+                    actuator_gainprm=updated_gainprm, actuator_biasprm=updated_biasprm
+                )
 
                 cost = self.task.dt * self.task.running_cost(x, u)
                 sites = self.task.get_trace_sites(x)

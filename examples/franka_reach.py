@@ -157,6 +157,7 @@ def main():
         max_traces=5,
         show_debug_info=True,
         record_video=True,
+        plot_costs=True,
     )
 
 

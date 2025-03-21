@@ -206,11 +206,11 @@ def run_interactive(
                 if controller.task.gain_mode != GainOptimizationMode.NONE:
                     # Extract control and gains
                     ctrl, p_gains, d_gains = controller.task.extract_gains(u)
-
                     # Update the actuator gain parameters in the model
                     for j in range(controller.task.nu_ctrl):
-                        mj_model.actuator_gainprm[j, 1] = p_gains[j]
-                        mj_model.actuator_gainprm[j, 2] = d_gains[j]
+                        mj_model.actuator_gainprm[j, 0] = p_gains[j]
+                        mj_model.actuator_biasprm[j, 1] = -p_gains[j]
+                        mj_model.actuator_biasprm[j, 2] = -d_gains[j]
 
                     # Apply control
                     mj_data.ctrl[: controller.task.nu_ctrl] = np.array(ctrl)
@@ -283,17 +283,14 @@ def run_interactive(
                     if hasattr(controller.task, "reference_id"):
                         geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
                         # If the controller.task.nu is 2 (2D control), then we only show 2d else assume 3D control TODO: Maybe a more elegant way to do this
-                        R = mj_data.site_xmat[controller.task.reference_id].reshape(
+                        Rbr = mj_data.site_xmat[controller.task.reference_id].reshape(
                             3, 3
                         )
+                        rRBb = mj_data.site_xpos[controller.task.reference_id]
                         if controller.task.nu_ctrl == 2:
-                            reference_pos = mj_data.site_xpos[
-                                controller.task.reference_id
-                            ] + R.T @ np.array([u[0], u[1], 0.0])
+                            reference_pos = rRBb + Rbr @ np.array([u[0], u[1], 0.0])
                         else:
-                            reference_pos = mj_data.site_xpos[
-                                controller.task.reference_id
-                            ] + R.T @ np.array([u[0], u[1], u[2]])
+                            reference_pos = rRBb + Rbr @ np.array([u[0], u[1], u[2]])
 
                         mujoco.mjv_initGeom(
                             geom,
