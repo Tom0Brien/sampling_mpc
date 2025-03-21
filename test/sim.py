@@ -15,9 +15,11 @@ def main():
 
     # Change the actuator gains
     for i in range(model.nu):
-        model.actuator_gainprm[i, 0] = 100
-        model.actuator_gainprm[i, 1] = 10
-
+        kp = 100
+        kv = 100
+        model.actuator_gainprm[i, 0] = kp
+        model.actuator_biasprm[i, 1] = -kp
+        model.actuator_biasprm[i, 2] = -kv
     # Simulate indefinitely.
     with mujoco.viewer.launch_passive(model, data) as viewer:
         # Track simulation time
