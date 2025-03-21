@@ -57,10 +57,14 @@ class CEM(SamplingBasedController):
         self.sigma_start = sigma_start
         self.num_elites = num_elites
 
-    def init_params(self, seed: int = 0) -> CEMParams:
+    def init_params(
+        self, initial_control: jax.Array = None, seed: int = 0
+    ) -> CEMParams:
         """Initialize the policy parameters."""
         rng = jax.random.key(seed)
         mean = jnp.zeros((self.task.planning_horizon, self.task.nu_total))
+        if initial_control is not None:
+            mean = initial_control
         cov = jnp.full_like(mean, self.sigma_start)
         return CEMParams(mean=mean, cov=cov, rng=rng)
 

@@ -223,7 +223,7 @@ class SamplingBasedController(ABC):
         )
 
     @abstractmethod
-    def init_params(self) -> Any:
+    def init_params(self, initial_control: jax.Array = None) -> Any:
         """Initialize the policy parameters, U = [u₀, u₁, ... ] ~ π(params).
 
         Returns:
