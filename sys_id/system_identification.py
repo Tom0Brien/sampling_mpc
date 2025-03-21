@@ -13,6 +13,7 @@ from mujoco import mjx
 
 from hydrax.tasks.franka_reach import FrankaReach
 from hydrax.task_base import GainOptimizationMode
+from hydrax import ROOT
 
 
 class FrankaMujocoSimulator:
@@ -45,29 +46,34 @@ class FrankaMujocoSimulator:
         Args:
             params: List or array of parameters:
                    - First n parameters are joint damping multipliers
-                   - Last parameter is controller gain scaling
+                   - Second to last parameter is translational gain scaling
+                   - Last parameter is rotational gain scaling
 
         Returns:
-            Updated MuJoCo model and initial data
+            Updated MuJoCo model and gain scaling parameters
         """
         # Extract parameters
         n_damp = len(self.default_damp)
         damp_multipliers = params[:n_damp]
-        gain_scaling = params[n_damp]
+        trans_gain_scaling = params[n_damp]
+        rot_gain_scaling = params[n_damp + 1]
 
-        # Create a copy of the model
-        model = self.mj_model
+        # Create a new model
+        model = mujoco.MjModel.from_xml_path(
+            ROOT + "/models/franka_emika_panda/mjx_scene_reach.xml"
+        )
 
         # Update joint damping (multiply original values by scaling factors)
         model.dof_damping = self.default_damp * damp_multipliers
 
-        # Return the updated model and controller gain scaling
-        return model, gain_scaling
+        # Return the updated model and controller gain scaling parameters
+        return model, trans_gain_scaling, rot_gain_scaling
 
     def simulate_trajectory(
         self,
         model,
-        gain_scaling,
+        trans_gain_scaling,
+        rot_gain_scaling,
         commanded_ee_poses,
         controller_params,
         duration,
@@ -77,7 +83,8 @@ class FrankaMujocoSimulator:
 
         Args:
             model: MuJoCo model with updated parameters
-            gain_scaling: Controller gain scaling factor
+            trans_gain_scaling: Translational controller gain scaling factor
+            rot_gain_scaling: Rotational controller gain scaling factor
             commanded_ee_poses: Array of commanded Cartesian poses [x, y, z, qx, qy, qz, qw]
             controller_params: Controller parameters dict with keys:
                                - translational_stiffness
@@ -105,8 +112,10 @@ class FrankaMujocoSimulator:
         mujoco.mj_kinematics(model, data)
 
         # Extract controller parameters and apply scaling
-        trans_stiffness = controller_params["translational_stiffness"] * gain_scaling
-        rot_stiffness = controller_params["rotational_stiffness"] * gain_scaling
+        trans_stiffness = (
+            controller_params["translational_stiffness"] * trans_gain_scaling
+        )
+        rot_stiffness = controller_params["rotational_stiffness"] * rot_gain_scaling
 
         # Calculate corresponding damping from stiffness (critical damping assumption)
         trans_damping = 2.0 * np.sqrt(trans_stiffness)  # Critical damping
@@ -116,11 +125,13 @@ class FrankaMujocoSimulator:
         # For each cartesian DoF, set the appropriate gain
         for i in range(3):  # x, y, z translation
             model.actuator_gainprm[i, 1] = trans_stiffness  # Kp
-            model.actuator_gainprm[i, 2] = trans_damping  # Kd
+            model.actuator_biasprm[i, 1] = -trans_stiffness  # Kp
+            model.actuator_biasprm[i, 2] = -trans_damping  # Kv
 
         for i in range(3, 6):  # roll, pitch, yaw rotation
             model.actuator_gainprm[i, 1] = rot_stiffness  # Kp
-            model.actuator_gainprm[i, 2] = rot_damping  # Kd
+            model.actuator_biasprm[i, 1] = -rot_stiffness  # Kp
+            model.actuator_biasprm[i, 2] = -rot_damping  # Kv
 
         # Determine the time step and number of steps
         timestep = model.opt.timestep
@@ -238,7 +249,8 @@ class SystemIdentifier:
         Args:
             params: List or array of parameters:
                    - First n parameters are joint damping multipliers
-                   - Last parameter is controller gain scaling
+                   - Second to last parameter is translational gain scaling
+                   - Last parameter is rotational gain scaling
 
         Returns:
             Error metric (RMSE) between real and simulated trajectories
@@ -246,20 +258,25 @@ class SystemIdentifier:
         # Print the current parameters
         n_damp = len(self.simulator.default_damp)
         damp_multipliers = params[:n_damp]
-        gain_scaling = params[n_damp]
+        trans_gain_scaling = params[n_damp]
+        rot_gain_scaling = params[n_damp + 1]
 
         print(
-            f"Evaluating - Damping multipliers: {damp_multipliers.round(2)}, Gain scaling: {gain_scaling:.2f}"
+            f"Evaluating - Damping multipliers: {damp_multipliers.round(2)}, "
+            f"Trans gain: {trans_gain_scaling:.2f}, Rot gain: {rot_gain_scaling:.2f}"
         )
 
         # Update the model parameters
-        model, gain_scaling = self.simulator.update_parameters(params)
+        model, trans_gain_scaling, rot_gain_scaling = self.simulator.update_parameters(
+            params
+        )
 
         # Simulate the trajectory
         start_time = time.time()
         sim_data = self.simulator.simulate_trajectory(
             model,
-            gain_scaling,
+            trans_gain_scaling,
+            rot_gain_scaling,
             self.commanded_ee_poses,
             self.controller_params,
             self.duration,
@@ -322,38 +339,135 @@ class SystemIdentifier:
 
         return combined_error
 
-    def optimize(self, method="BFGS", options=None):
-        """Run the optimization process.
+    def optimize(self, n_trials=30, timeout=None, output_dir="sys_id/results"):
+        """Run the optimization process using Optuna.
 
         Args:
-            method: Optimization method for scipy.optimize.minimize
-            options: Dictionary of options for the optimizer
+            n_trials: Number of trials for optimization
+            timeout: Timeout in seconds for the optimization process
+            output_dir: Directory to save results
 
         Returns:
             Optimization results
         """
-        # Default options
-        if options is None:
-            options = {"maxiter": 30, "disp": True}
+        import optuna
+        from optuna.samplers import TPESampler
+        import os
 
-        # Initial parameters
-        n_damp = len(self.simulator.default_damp)
-        initial_params = np.ones(n_damp + 1)  # Damping multipliers + gain scaling
+        # Create output directory if it doesn't exist
+        os.makedirs(output_dir, exist_ok=True)
 
-        # Bounds: damping multipliers between 0.1 and 10, gain scaling between 0.1 and 2.0
-        bounds = [(0.1, 10.0)] * n_damp + [(0.1, 2.0)]
+        # Define the objective function for Optuna
+        def objective(trial):
+            # Get number of damping parameters
+            n_damp = len(self.simulator.default_damp)
 
-        # Run the optimization
-        print("Starting optimization...")
-        result = minimize(
-            self.objective_function,
-            initial_params,
-            method=method,
-            bounds=bounds,
-            options=options,
+            # Define parameters to optimize with reasonable bounds
+            params = []
+
+            # Joint damping multipliers (between 0.1 and 10.0)
+            for i in range(n_damp):
+                param = trial.suggest_float(f"damp_mult_{i}", 0.1, 10.0, log=True)
+                params.append(param)
+
+            # Translational controller gain scaling (between 0.1 and 20.0)
+            trans_gain_scaling = trial.suggest_float("trans_gain_scaling", 0.1, 20.0)
+            params.append(trans_gain_scaling)
+
+            # Rotational controller gain scaling (between 0.1 and 20.0)
+            rot_gain_scaling = trial.suggest_float("rot_gain_scaling", 0.1, 20.0)
+            params.append(rot_gain_scaling)
+
+            # Convert to numpy array and evaluate
+            params = np.array(params)
+            return self.objective_function(params)
+
+        # Create a new study with the TPE sampler (works well for genetic-algorithm-like optimization)
+        study = optuna.create_study(
+            sampler=TPESampler(
+                multivariate=True
+            ),  # Multivariate TPE handles parameter interactions
+            direction="minimize",
+            study_name="franka_system_identification",
         )
 
-        return result
+        # Run the optimization
+        print("Starting Optuna optimization...")
+        study.optimize(objective, n_trials=n_trials, timeout=timeout)
+
+        # Extract the best parameters
+        best_params = []
+        n_damp = len(self.simulator.default_damp)
+
+        for i in range(n_damp):
+            best_params.append(study.best_params[f"damp_mult_{i}"])
+        best_params.append(study.best_params["trans_gain_scaling"])
+        best_params.append(study.best_params["rot_gain_scaling"])
+
+        best_params = np.array(best_params)
+
+        # Print optimization summary
+        print("\nOptuna Optimization Results:")
+        print(f"Best value: {study.best_value}")
+        print(f"Best parameters: {best_params}")
+
+        # Create optimization history plot
+        self._plot_optimization_history(study, output_dir)
+
+        # Create parameter importance plot
+        self._plot_parameter_importance(study, output_dir)
+
+        return {
+            "best_params": best_params,
+            "best_value": study.best_value,
+            "study": study,
+        }
+
+    def _plot_optimization_history(self, study, output_dir):
+        """Plot the optimization history.
+
+        Args:
+            study: Optuna study
+            output_dir: Directory to save plots
+        """
+        import optuna.visualization as vis
+        import matplotlib.pyplot as plt
+
+        # Plot optimization history
+        # fig = vis.plot_optimization_history(study)
+        # fig.write_image(os.path.join(output_dir, "optuna_history.png"))
+
+        # Also create a simple matplotlib version for better compatibility
+        plt.figure(figsize=(10, 6))
+        plt.plot(
+            [t.number for t in study.trials], [t.value for t in study.trials], "bo-"
+        )
+        plt.xlabel("Trial Number")
+        plt.ylabel("Objective Value")
+        plt.title("Optimization History")
+        plt.grid(True)
+        plt.savefig(os.path.join(output_dir, "optimization_history.png"))
+        plt.close()
+
+    def _plot_parameter_importance(self, study, output_dir):
+        """Plot parameter importance.
+
+        Args:
+            study: Optuna study
+            output_dir: Directory to save plots
+        """
+        import optuna.visualization as vis
+
+        try:
+            # Plot parameter importance
+            fig = vis.plot_param_importances(study)
+            fig.write_image(os.path.join(output_dir, "param_importance.png"))
+
+            # Plot parallel coordinate plot
+            fig = vis.plot_parallel_coordinate(study)
+            fig.write_image(os.path.join(output_dir, "parallel_coordinate.png"))
+        except Exception as e:
+            print(f"Warning: Could not create some Optuna visualizations: {e}")
 
     def evaluate_and_visualize(self, params):
         """Evaluate the model with given parameters and visualize the results.
@@ -365,12 +479,15 @@ class SystemIdentifier:
             Dictionary with simulation results and comparison metrics
         """
         # Update model with optimized parameters
-        model, gain_scaling = self.simulator.update_parameters(params)
+        model, trans_gain_scaling, rot_gain_scaling = self.simulator.update_parameters(
+            params
+        )
 
         # Simulate the trajectory
         sim_data = self.simulator.simulate_trajectory(
             model,
-            gain_scaling,
+            trans_gain_scaling,
+            rot_gain_scaling,
             self.commanded_ee_poses,
             self.controller_params,
             self.duration,
@@ -383,13 +500,15 @@ class SystemIdentifier:
         # Extract and print the optimized parameters
         n_damp = len(self.simulator.default_damp)
         damp_multipliers = params[:n_damp]
-        gain_scaling = params[n_damp]
+        trans_gain_scaling = params[n_damp]
+        rot_gain_scaling = params[n_damp + 1]
 
         optimized_damping = self.simulator.default_damp * damp_multipliers
 
         print("\nOptimized Parameters:")
         print(f"Joint damping values: {optimized_damping}")
-        print(f"Controller gain scaling: {gain_scaling}")
+        print(f"Translational gain scaling: {trans_gain_scaling}")
+        print(f"Rotational gain scaling: {rot_gain_scaling}")
 
         # Calculate the error metrics
         real_poses = self.measured_ee_poses
@@ -432,7 +551,8 @@ class SystemIdentifier:
         return {
             "sim_data": sim_data,
             "optimized_damping": optimized_damping,
-            "gain_scaling": gain_scaling,
+            "trans_gain_scaling": trans_gain_scaling,
+            "rot_gain_scaling": rot_gain_scaling,
             "rmse_pos": rmse_pos,
             "rmse_ori": rmse_ori,
         }
@@ -588,14 +708,10 @@ def main():
         "data_file", type=str, help="Path to the collected data file (.npy)"
     )
     parser.add_argument(
-        "--method",
-        type=str,
-        default="Nelder-Mead",
-        choices=["Nelder-Mead", "Powell", "CG", "BFGS", "L-BFGS-B"],
-        help="Optimization method",
+        "--n-trials", type=int, default=30, help="Number of optimization trials"
     )
     parser.add_argument(
-        "--max-iter", type=int, default=20, help="Maximum number of iterations"
+        "--timeout", type=int, default=None, help="Optimization timeout in seconds"
     )
     parser.add_argument(
         "--output-dir",
@@ -631,40 +747,38 @@ def main():
         # Evaluate and visualize
         results = identifier.evaluate_and_visualize(params)
     else:
-        # Run the optimization
-        options = {"maxiter": args.max_iter, "disp": True}
-        result = identifier.optimize(method=args.method, options=options)
+        # Run the optimization using Optuna
+        optimization_result = identifier.optimize(
+            n_trials=args.n_trials, timeout=args.timeout, output_dir=args.output_dir
+        )
+
+        # Get the best parameters
+        best_params = optimization_result["best_params"]
 
         print("\nOptimization Results:")
-        print(f"Success: {result.success}")
-        print(f"Iterations: {result.nit}")
-        print(f"Function evaluations: {result.nfev}")
-        print(f"Final error: {result.fun}")
-        print(f"Optimized parameters: {result.x}")
+        print(f"Best objective value: {optimization_result['best_value']}")
+        print(f"Best parameters: {best_params}")
 
         # Save optimization results
         np.save(
             os.path.join(args.output_dir, "optimization_results.npy"),
             {
-                "success": result.success,
-                "iterations": result.nit,
-                "function_evaluations": result.nfev,
-                "final_error": result.fun,
-                "optimized_parameters": result.x,
-                "message": result.message,
+                "best_value": optimization_result["best_value"],
+                "best_parameters": best_params,
             },
         )
 
         # Evaluate with the optimized parameters
         print("\nEvaluating with optimized parameters:")
-        results = identifier.evaluate_and_visualize(result.x)
+        results = identifier.evaluate_and_visualize(best_params)
 
         # Save the optimized parameters in a format for later use
         np.save(
             os.path.join(args.output_dir, "optimized_parameters.npy"),
             {
                 "joint_damping": results["optimized_damping"],
-                "gain_scaling": results["gain_scaling"],
+                "trans_gain_scaling": results["trans_gain_scaling"],
+                "rot_gain_scaling": results["rot_gain_scaling"],
                 "rmse_position": results["rmse_pos"],
                 "rmse_orientation": results["rmse_ori"],
             },
@@ -681,7 +795,8 @@ def main():
                 f.write(f"joint_damping_{i}: {value}\n")
 
             f.write(f"\n# Controller gain scaling\n")
-            f.write(f"gain_scaling: {results['gain_scaling']}\n")
+            f.write(f"translational_gain_scaling: {results['trans_gain_scaling']}\n")
+            f.write(f"rotational_gain_scaling: {results['rot_gain_scaling']}\n")
 
     print("\nSystem identification complete!")
 
