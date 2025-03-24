@@ -38,7 +38,7 @@
 
   <default>
     <default class="translation">
-      <position kp="100" kv="34.64" ctrlrange="-1 1"/>
+      <position kp="50" kv="14.14" ctrlrange="-1 1"/>
     </default>
     <default class="rotation">
       <!--
@@ -47,14 +47,14 @@
       Increase this range to pi or bigger in order to see the instabillity.
       See here for more details https://mujoco.readthedocs.io/en/latest/XMLreference.html#actuator
       -->
-      <position kp="50" kv="14.14" ctrlrange="-3.14 3.14"/>
+      <position kp="30" kv="10.95" ctrlrange="-3.14 3.14"/>
     </default>
     <!--
     Clamping the total actuator torque at the joints means that the motion produced by the Cartesian
     commands is achievable by individual joint actuators with the specified torque limits.
     See https://mujoco.readthedocs.io/en/latest//modeling.html#actuator-force-clamping
     -->
-    <joint armature="1e-3" damping="1e-3" stiffness="1e-2" actuatorfrcrange="-1 1" actuatorgravcomp="true"/>
+    <joint armature="0" damping="0" stiffness="0" actuatorfrcrange="-1 1" actuatorgravcomp="true"/>
     <site type="box" size=".012 .012 .012" rgba=".7 .7 .8 1"/>
   </default>
 
@@ -158,17 +158,17 @@
       <body name="link1" pos="0 0 0.333" gravcomp="1">
         <inertial mass="4.970684" pos="0.003875 0.002081 -0.04762"
           fullinertia="0.70337 0.70661 0.0091170 -0.00013900 0.0067720 0.019169"/>
-        <joint name="joint1" damping="2" actuatorgravcomp="true"/>
+        <joint name="joint1" range="-2.8973 2.8973"/>
         <geom material="white" mesh="link1" class="visual"/>
         <geom mesh="link1_c" class="collision"/>
         <body name="link2" quat="1 -1 0 0" gravcomp="1">
           <inertial mass="0.646926" pos="-0.003141 -0.02872 0.003495"
             fullinertia="0.0079620 2.8110e-2 2.5995e-2 -3.925e-3 1.0254e-2 7.04e-4"/>
-          <joint name="joint2" range="-1.7628 1.7628" damping="2" actuatorgravcomp="true"/>
+          <joint name="joint2" range="-1.7628 1.7628"/>
           <geom material="white" mesh="link2" class="visual"/>
           <geom mesh="link2_c" class="collision"/>
           <body name="link3" pos="0 -0.316 0" quat="1 1 0 0" gravcomp="1">
-            <joint name="joint3" damping="2" actuatorgravcomp="true"/>
+            <joint name="joint3" range="-2.8973 2.8973"/>
             <inertial mass="3.228604" pos="2.7518e-2 3.9252e-2 -6.6502e-2"
               fullinertia="3.7242e-2 3.6155e-2 1.083e-2 -4.761e-3 -1.1396e-2 -1.2805e-2"/>
             <geom mesh="link3_0" material="white" class="visual"/>
@@ -179,7 +179,7 @@
             <body name="link4" pos="0.0825 0 0" quat="1 1 0 0" gravcomp="1">
               <inertial mass="3.587895" pos="-5.317e-2 1.04419e-1 2.7454e-2"
                 fullinertia="2.5853e-2 1.9552e-2 2.8323e-2 7.796e-3 -1.332e-3 8.641e-3"/>
-              <joint name="joint4" range="-3.0718 3.7525" damping="2" actuatorgravcomp="true"/>
+              <joint name="joint4" range="-3.0718 -0.0698" />
               <geom mesh="link4_0" material="white" class="visual"/>
               <geom mesh="link4_1" material="white" class="visual"/>
               <geom mesh="link4_2" material="black" class="visual"/>
@@ -188,7 +188,7 @@
               <body name="link5" pos="-0.0825 0.384 0" quat="1 -1 0 0" gravcomp="1">
                 <inertial mass="1.225946" pos="-1.1953e-2 4.1065e-2 -3.8437e-2"
                   fullinertia="3.5549e-2 2.9474e-2 8.627e-3 -2.117e-3 -4.037e-3 2.29e-4"/>
-                <joint name="joint5" damping="2" actuatorgravcomp="true"/>
+                <joint name="joint5" range="-2.8973 2.8973"/>
                 <geom mesh="link5_0" material="black" class="visual"/>
                 <geom mesh="link5_1" material="white" class="visual"/>
                 <geom mesh="link5_2" material="white" class="visual"/>
@@ -198,7 +198,7 @@
                 <body name="link6" quat="1 1 0 0" gravcomp="1">
                   <inertial mass="1.666555" pos="6.0149e-2 -1.4117e-2 -1.0517e-2"
                     fullinertia="1.964e-3 4.354e-3 5.433e-3 1.09e-4 -1.158e-3 3.41e-4"/>
-                  <joint name="joint6" range="-3.7525 3.7525" damping="2" actuatorgravcomp="true"/>
+                  <joint name="joint6" range="-0.0175 3.7525" />
                   <geom mesh="link6_0" material="off_white" class="visual"/>
                   <geom mesh="link6_1" material="white" class="visual"/>
                   <geom mesh="link6_2" material="black" class="visual"/>
@@ -220,7 +220,7 @@
                   <body name="link7" pos="0.088 0 0" quat="1 1 0 0" gravcomp="1">
                     <inertial mass="7.35522e-01" pos="1.0517e-2 -4.252e-3 6.1597e-2"
                       fullinertia="1.2516e-2 1.0027e-2 4.815e-3 -4.28e-4 -1.196e-3 -7.41e-4"/>
-                    <joint name="joint7" damping="2" actuatorgravcomp="true"/>
+                    <joint name="joint7" range="-2.8973 2.8973"/>
                     <geom mesh="link7_0" material="white" class="visual"/>
                     <geom mesh="link7_1" material="black" class="visual"/>
                     <geom mesh="link7_2" material="black" class="visual"/>
@@ -246,7 +246,7 @@
                        <geom name="gripper_sphere" type="sphere" size="0.02" pos="0 0 0.1" conaffinity="3" />
                       <body name="left_finger" pos="0 0 0.0584" gravcomp="1">
                         <inertial mass="0.015" pos="0 0 0" diaginertia="2.375e-6 2.375e-6 7.5e-7"/>
-                        <joint name="finger_joint1" class="finger" damping="2" actuatorgravcomp="true"/>
+                        <joint name="finger_joint1" class="finger" />
                         <geom mesh="finger_0" material="off_white" class="visual"/>
                         <geom mesh="finger_1" material="black" class="visual"/>
                         <geom mesh="finger_0" class="collision"/>
@@ -257,7 +257,7 @@
                       </body>
                       <body name="right_finger" pos="0 0 0.0584" quat="0 0 0 1" gravcomp="1">
                         <inertial mass="0.015" pos="0 0 0" diaginertia="2.375e-6 2.375e-6 7.5e-7"/>
-                        <joint name="finger_joint2" class="finger" damping="2" actuatorgravcomp="true"/>
+                        <joint name="finger_joint2" class="finger" />
                         <geom mesh="finger_0" material="off_white" class="visual"/>
                         <geom mesh="finger_1" material="black" class="visual"/>
                         <geom mesh="finger_0" class="collision"/>
@@ -282,14 +282,14 @@
   </equality>
 
   <actuator>
-    <position name="x"  site="gripper" refsite="reference" gear="1 0 0 0 0 0" class="translation"/>
+    <!-- <position name="x"  site="gripper" refsite="reference" gear="1 0 0 0 0 0" class="translation"/>
     <position name="y"  site="gripper" refsite="reference" gear="0 1 0 0 0 0" class="translation"/>
     <position name="z"  site="gripper" refsite="reference" gear="0 0 1 0 0 0" class="translation"/>
     <position name="rx" site="gripper" refsite="reference" gear="0 0 0 1 0 0" class="rotation"/>
     <position name="ry" site="gripper" refsite="reference" gear="0 0 0 0 1 0" class="rotation"/>
-    <position name="rz" site="gripper" refsite="reference" gear="0 0 0 0 0 1" class="rotation"/>
+    <position name="rz" site="gripper" refsite="reference" gear="0 0 0 0 0 1" class="rotation"/> -->
 
-    <!-- <motor name="joint1_motor" joint="joint1" gear="1" ctrlrange="-87 87"/>
+    <motor name="joint1_motor" joint="joint1" gear="1" ctrlrange="-87 87"/>
     <motor name="joint2_motor" joint="joint2" gear="1" ctrlrange="-87 87"/>
     <motor name="joint3_motor" joint="joint3" gear="1" ctrlrange="-87 87"/>
     <motor name="joint4_motor" joint="joint4" gear="1" ctrlrange="-87 87"/>
@@ -299,6 +299,6 @@
     <general class="panda" name="actuator8" joint="finger_joint1"
      ctrlrange="0 0.04" gainprm="350 0 0" biasprm="0 -350 -10" forcerange="-200 200"/>
     <general class="panda" name="actuator9" joint="finger_joint2"
-     ctrlrange="0 0.04" gainprm="350 0 0" biasprm="0 -350 -10" forcerange="-200 200"/> -->
+     ctrlrange="0 0.04" gainprm="350 0 0" biasprm="0 -350 -10" forcerange="-200 200"/>
   </actuator>
 </mujoco>
