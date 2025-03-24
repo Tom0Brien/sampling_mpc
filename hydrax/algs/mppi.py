@@ -110,5 +110,4 @@ class MPPI(SamplingBasedController):
         """Get the control action for the current time step, zero order hold."""
         idx_float = t / self.task.dt  # zero order hold
         idx = jnp.floor(idx_float).astype(jnp.int32)
-        # print(f"idx: {idx}")
         return params.mean[idx]
