@@ -294,7 +294,19 @@ def apply_control(
 
     elif control_mode == ControlMode.CARTESIAN:
         # Compute impedance control
-        Kp = jnp.diag(jnp.array([300, 300, 300, 50, 50, 50], dtype=float))
+        Kp = jnp.diag(
+            jnp.array(
+                [
+                    controller.task.trans_p,
+                    controller.task.trans_p,
+                    controller.task.trans_p,
+                    controller.task.rot_p,
+                    controller.task.rot_p,
+                    controller.task.rot_p,
+                ],
+                dtype=float,
+            )
+        )
         Kd = 2.0 * jnp.sqrt(Kp)
         tau = impedance_control(
             mj_model,
@@ -303,7 +315,7 @@ def apply_control(
             u[3:],
             Kp,
             Kd,
-            1.0,
+            controller.task.nullspace_stiffness,
             controller.task.q_d_nullspace,
             controller.task.ee_site_id,
         )
