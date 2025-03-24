@@ -3,10 +3,13 @@
 GPU-Accelerated Cartesian Pose Impedance Controller using MuJoCo MJX.
 """
 
+import numpy as np
 import jax.numpy as jnp
 from mujoco import mjx
+import mujoco
 from mujoco.mjx._src.support import jac
-from hydrax.util import *
+from mujoco.mjx._src.math import quat_mul, quat_inv
+from hydrax.util import mat_to_quat, quat_to_vel, eul_to_quat, pseudo_inverse
 import os
 
 # Set XLA flags for better performance
@@ -28,44 +31,41 @@ def impedance_control_mjx(
     Compute Cartesian pose impedance control torque using MJX.
     Designed to work with JAX transformations (jit, vmap).
     """
-    # Run forward dynamics
-    data_mjx = mjx.forward(model_mjx, data_mjx)
+    # Unpack states and end-effector pose.
     q = data_mjx.qpos
     dq = data_mjx.qvel
-
-    # End-effector pose
     p_curr = data_mjx.site_xpos[site_id]
     rot_ee = data_mjx.site_xmat[site_id].reshape((3, 3))
     quat_curr = mat_to_quat(rot_ee)
 
-    # Get jacobians for the site
-    jacp, jacr = jac(model_mjx, data_mjx, p_curr, 8)
-    jacp = jacp.T
-    jacr = jacr.T
-    J = jnp.concatenate([jacp, jacr], axis=0)
+    # Compute jacobian for the site.
+    jacp, jacr = jac(model_mjx, data_mjx, p_curr, site_id)
+    J = jnp.concatenate([jacp.T, jacr.T], axis=0)
 
-    # Compute positional/orientation errors
-    e_pos = p_curr - p_des
-    e_ori = orientation_error(quat_curr, eul_to_quat(eul_des), rot_ee)
+    # Compute positional/orientation errors.
+    e_pos = p_des - p_curr
+    quat_curr_conj = quat_inv(quat_curr)
+    error_quat = quat_mul(eul_to_quat(eul_des), quat_curr_conj)
+    e_ori = quat_to_vel(error_quat, 1.0)
     e = jnp.concatenate([e_pos, e_ori], axis=0)
 
-    # End-effector velocity in task space
+    # Compute end-effector velocity in task space.
     v = J @ dq
 
-    # Cartesian impedance
-    F_ee_des = -Kp @ e - Kd @ v
+    # Compute cartesian impedance (PD control).
+    F_ee_des = Kp @ e - Kd @ v
     tau_task = J.T @ F_ee_des
 
-    # Nullspace control
-    # Jt_pinv = pseudo_inverse(J.T)
-    # proj = jnp.eye(model_mjx.nv) - (J.T @ Jt_pinv)
-    # dn = 2.0 * jnp.sqrt(nullspace_stiffness)
-    # tau_null = proj @ (nullspace_stiffness * (q_d_nullspace - q) - dn * dq)
+    # Compute nullspace control.
+    Jt_pinv = pseudo_inverse(J.T)
+    proj = jnp.eye(model_mjx.nv) - (J.T @ Jt_pinv)
+    dn = 2.0 * jnp.sqrt(nullspace_stiffness)
+    tau_null = proj @ (nullspace_stiffness * (q_d_nullspace - q) - dn * dq)
 
-    # Coriolis Compensation (no gravity compensation in Franka example)
+    # Coriolis compensation (Gravity compensation added by default in MuJoCo and Franka arms).
     tau_cor = data_mjx.qfrc_bias - data_mjx.qfrc_gravcomp
 
-    return tau_task + tau_cor  # + tau_null
+    return tau_task + tau_cor + tau_null
 
 
 def impedance_control(
@@ -74,37 +74,38 @@ def impedance_control(
     """
     Compute Cartesian pose impedance control torque using mujoco.
     """
-    mujoco.mj_forward(model, data)
+    # Unpack states and end-effector pose.
     q = jnp.array(data.qpos)
     dq = jnp.array(data.qvel)
-    # End-effector pose
     p_curr = jnp.array(data.site_xpos[site_id])
     rot_ee = jnp.array(data.site_xmat[site_id].reshape((3, 3)))
     quat_curr = mat_to_quat(rot_ee)
 
-    # Jacobian
+    # Compute jacobian for the site.
     J = np.zeros((6, model.nv))
     mujoco.mj_jacSite(model, data, J[:3, :], J[3:, :], site_id)
 
-    # Compute positional/orientation errors
-    e_pos = p_curr - p_des
-    e_ori = orientation_error(quat_curr, eul_to_quat(eul_des), rot_ee)
+    # Compute positional/orientation errors.
+    e_pos = p_des - p_curr
+    quat_curr_conj = quat_inv(quat_curr)
+    error_quat = quat_mul(eul_to_quat(eul_des), quat_curr_conj)
+    e_ori = quat_to_vel(error_quat, 1.0)
     e = jnp.concatenate([e_pos, e_ori], axis=0)
 
-    # End-effector velocity in task space
+    # Compute end-effector velocity in task space.
     v = J @ dq
 
-    # Cartesian impedance (PD control)
-    F_ee_des = -Kp @ e - Kd @ v
+    # Compute cartesian impedance (PD control).
+    F_ee_des = Kp @ e - Kd @ v
     tau_task = J.T @ F_ee_des
 
-    # Nullspace control
-    # Jt_pinv = pseudo_inverse(J.T)
-    # proj = jnp.eye(model.nv) - (J.T @ Jt_pinv)
-    # dn = 2.0 * jnp.sqrt(nullspace_stiffness)
-    # tau_null = proj @ (nullspace_stiffness * (q_d_nullspace - q) - dn * dq)
+    # Compute nullspace control.
+    Jt_pinv = pseudo_inverse(J.T)
+    proj = jnp.eye(model.nv) - (J.T @ Jt_pinv)
+    dn = 2.0 * jnp.sqrt(nullspace_stiffness)
+    tau_null = proj @ (nullspace_stiffness * (q_d_nullspace - q) - dn * dq)
 
-    # Coriolis Compensation (no gravity compensation in Franka example)
+    # Compute coriolis compensation (Gravity compensation added by default in MuJoCo and Franka arms).
     mujoco.mj_inverse(model, data)
     tau_cor = jnp.array(data.qfrc_bias) - jnp.array(data.qfrc_gravcomp)
-    return tau_task + tau_cor  # + tau_null
+    return tau_task + tau_cor + tau_null

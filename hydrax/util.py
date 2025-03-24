@@ -39,6 +39,20 @@ def quat_mul(q1, q2):
     return jnp.array([w, x, y, z])
 
 
+def quat_to_vel(q, dt):
+    """Convert a unit quaternion [w,x,y,z] to a 3d velocity vector [x,y,z]. Based on mujoco C implementation"""
+    axis = jnp.array([q[1], q[2], q[3]])
+    sin_a_2 = jnp.linalg.norm(axis)
+    normalised_axis = axis / sin_a_2
+    speed = 2 * jnp.arctan2(sin_a_2, q[0])
+
+    # Replace if statement with jnp.where for JAX compatibility
+    speed = jnp.where(speed > jnp.pi, speed - 2 * jnp.pi, speed)
+    speed /= dt
+
+    return normalised_axis * speed
+
+
 def quat_flip_if_needed(q_curr, q_des):
     """Flip q_curr sign if needed to avoid discontinuity."""
     return jnp.where(jnp.dot(q_des, q_curr) < 0.0, -q_curr, q_curr)

@@ -8,55 +8,13 @@ Simplified to remove torque rate limiting (delta-tau) and tool compensation.
 
 import time
 import numpy as np
-import jax
 import jax.numpy as jnp
 import mujoco
 import mujoco.viewer
 
 from hydrax import ROOT
-from util import *
-
-
-def impedance_control(
-    model, data, site_id, p_des, eul_des, Kp, Kd, nullspace_stiffness, q_d_nullspace
-):
-    """
-    Compute one step of the Cartesian pose impedance control torque.
-    """
-    mujoco.mj_forward(model, data)
-    q = jnp.array(data.qpos)
-    dq = jnp.array(data.qvel)
-    # End-effector pose
-    p_curr = jnp.array(data.site_xpos[site_id])
-    rot_ee = jnp.array(data.site_xmat[site_id].reshape((3, 3)))
-    quat_curr = mat_to_quat(rot_ee)
-
-    # Jacobian
-    J = np.zeros((6, model.nv))
-    mujoco.mj_jacSite(model, data, J[:3, :], J[3:, :], site_id)
-
-    # Compute positional/orientation errors
-    e_pos = p_curr - p_des
-    e_ori = orientation_error(quat_curr, eul_to_quat(eul_des), rot_ee)
-    e = jnp.concatenate([e_pos, e_ori], axis=0)
-
-    # End-effector velocity in task space
-    v = J @ dq
-
-    # Cartesian impedance (PD control)
-    F_ee_des = -Kp @ e - Kd @ v
-    tau_task = J.T @ F_ee_des
-
-    # Nullspace control
-    Jt_pinv = pseudo_inverse(J.T)
-    proj = jnp.eye(model.nv) - (J.T @ Jt_pinv)
-    dn = 2.0 * jnp.sqrt(nullspace_stiffness)
-    tau_null = proj @ (nullspace_stiffness * (q_d_nullspace - q) - dn * dq)
-
-    # Coriolis Compensation (no gravity compensation in Franka example)
-    mujoco.mj_inverse(model, data)
-    tau_cor = jnp.array(data.qfrc_bias) - jnp.array(data.qfrc_gravcomp)
-    return tau_task + tau_cor  # + tau_null
+from hydrax.util import *
+from hydrax.controllers.impedance_controllers import impedance_control
 
 
 if __name__ == "__main__":
@@ -82,7 +40,7 @@ if __name__ == "__main__":
 
     # Desired pose in position + Euler angles
     p_des = jnp.array([0.5, 0.0, 0.3])
-    eul_des = jnp.array([-3.14, 0.0, 0.0])
+    eul_des = jnp.array([-3.14, 1.571, 0.0])
 
     # Set the initial joint positions
     data.qpos[:7] = jnp.array([0, -M_PI_4, 0, -3 * M_PI_4, 0, M_PI_2, M_PI_4])

@@ -11,32 +11,37 @@ import mujoco
 from mujoco import mjx
 import os
 import sys
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import both controllers
-from impedance_control import impedance_control
-from impedance_control_gpu import impedance_control_mjx, eul_to_quat
+from hydrax.controllers.impedance_controllers import (
+    impedance_control,
+    impedance_control_mjx,
+)
+from hydrax import ROOT
+
 
 def test_controllers():
     print("Testing CPU vs GPU impedance controllers...")
-    
+
     # Load model
-    xml_path = "models/franka_emika_panda/mjx_scene.xml"
+    xml_path = ROOT + "/models/franka_emika_panda/mjx_scene.xml"
     model = mujoco.MjModel.from_xml_path(xml_path)
     data = mujoco.MjData(model)
-    
+
     # Run forward to initialize
     mujoco.mj_forward(model, data)
-    
+
     # Get body ID
     body_name = "hand"
     body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, body_name)
     site_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, "gripper")
-    
+
     # Create MJX versions
     model_mjx = mjx.put_model(model)
     data_mjx = mjx.put_data(model, data)
-    
+
     # Set up control parameters (identical for both)
     p_des = jnp.array([0.7, 0.0, 0.3])
     eul_des = jnp.array([0.0, 3.14, 0.0])
@@ -44,20 +49,20 @@ def test_controllers():
     Kd = jnp.diag(jnp.array([100, 100, 100, 10, 10, 10], dtype=float))
     nullspace_stiffness = 0.0
     q_d_nullspace = jnp.array(data.qpos)
-    
+
     # Run CPU controller
     tau_cpu = impedance_control(
         model=model,
         data=data,
-        site_id=site_id,
         p_des=p_des,
         eul_des=eul_des,
         Kp=Kp,
         Kd=Kd,
         nullspace_stiffness=nullspace_stiffness,
-        q_d_nullspace=q_d_nullspace
+        q_d_nullspace=q_d_nullspace,
+        site_id=site_id,
     )
-    
+
     # Run GPU controller
     tau_gpu = impedance_control_mjx(
         model_mjx=model_mjx,
@@ -68,17 +73,17 @@ def test_controllers():
         Kd=Kd,
         nullspace_stiffness=nullspace_stiffness,
         q_d_nullspace=q_d_nullspace,
-        site_id=site_id
+        site_id=site_id,
     )
-    
+
     # Convert to numpy arrays for comparison
     tau_cpu_np = np.array(tau_cpu)
     tau_gpu_np = np.array(tau_gpu)
-    
+
     # Calculate differences
     abs_diff = np.abs(tau_cpu_np - tau_gpu_np)
     rel_diff = abs_diff / (np.abs(tau_cpu_np) + 1e-10)
-    
+
     # Print results
     print("\nCPU controller torques:")
     print(tau_cpu_np)
@@ -90,7 +95,7 @@ def test_controllers():
     print(rel_diff)
     print("\nMax absolute difference:", np.max(abs_diff))
     print("Max relative difference:", np.max(rel_diff))
-    
+
     # Check if differences are within acceptable tolerance
     tolerance = 1e-3
     if np.max(abs_diff) < tolerance:
@@ -101,5 +106,6 @@ def test_controllers():
         worst_joint = np.argmax(abs_diff)
         print(f"Largest difference at joint {worst_joint}: {abs_diff[worst_joint]}")
 
+
 if __name__ == "__main__":
-    test_controllers() 
+    test_controllers()
