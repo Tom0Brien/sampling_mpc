@@ -43,20 +43,18 @@ def main():
 
     elif args.algorithm == "mppi":
         print("Running MPPI")
-        if control_mode == ControlMode.GENERAL_VI:
+        if control_mode == ControlMode.GENERAL:
+            ctrl = MPPI(task, num_samples=2000, noise_level=0.01, temperature=0.001)
+        elif control_mode == ControlMode.GENERAL_VI:
             ctrl = MPPI(
                 task,
                 num_samples=1000,
                 noise_level=np.array([0.01, 0.01, 1, 1, 1, 1]),
                 temperature=0.001,
             )
-        elif control_mode == ControlMode.CARTESIAN_SIMPLE_VI:
-            # Not supported for this task
-            raise ValueError(
-                "Simple variable impedance mode not supported for this task"
-            )
         else:
-            ctrl = MPPI(task, num_samples=2000, noise_level=0.01, temperature=0.001)
+            # Not supported for this task
+            raise ValueError("Control mode not supported for this task")
 
     elif args.algorithm == "cmaes":
         print("Running CMA-ES")
@@ -105,7 +103,6 @@ def main():
         plot_costs=True,
         show_debug_info=True,
     )
-    # run_interactive(ctrl, mj_model, mj_data)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from functools import partial
-from typing import Any, Tuple
+from typing import Any, Tuple, Dict
 
 import jax
 import jax.numpy as jnp
@@ -32,48 +32,55 @@ class Trajectory:
 
 
 class SamplingBasedController(ABC):
-    """An abstract sampling-based MPC algorithm interface."""
+    """Abstract base class for sampling-based MPC algorithms."""
 
     def __init__(
         self,
         task: Task,
         num_randomizations: int,
-        risk_strategy: RiskStrategy,
-        seed: int,
+        risk_strategy: RiskStrategy = None,
+        seed: int = 0,
     ):
         """Initialize the MPC controller.
 
         Args:
             task: The task instance defining the dynamics and costs.
             num_randomizations: The number of domain randomizations to use.
-            risk_strategy: How to combining costs from different randomizations.
+            risk_strategy: How to combine costs from different randomizations.
+                           Defaults to AverageCost if None.
             seed: The random seed for domain randomization.
         """
         self.task = task
         self.num_randomizations = max(num_randomizations, 1)
+        self.risk_strategy = risk_strategy or AverageCost()
 
-        # Risk strategy defaults to average cost
-        if risk_strategy is None:
-            risk_strategy = AverageCost()
-        self.risk_strategy = risk_strategy
-
-        # Use a single model (no domain randomization) by default
+        # Initialize with single model (no domain randomization) by default
         self.model = task.model
         self.randomized_axes = None
 
+        # Setup domain randomization if enabled
         if self.num_randomizations > 1:
-            # Make domain randomized models
-            rng = jax.random.key(seed)
-            rng, subrng = jax.random.split(rng)
-            subrngs = jax.random.split(subrng, num_randomizations)
-            randomizations = jax.vmap(self.task.domain_randomize_model)(subrngs)
-            self.model = self.task.model.tree_replace(randomizations)
+            self._setup_domain_randomization(seed)
 
-            # Keep track of which elements of the model have randomization
-            self.randomized_axes = jax.tree.map(lambda x: None, self.task.model)
-            self.randomized_axes = self.randomized_axes.tree_replace(
-                {key: 0 for key in randomizations.keys()}
-            )
+    def _setup_domain_randomization(self, seed: int) -> None:
+        """Set up domain randomized models.
+
+        Args:
+            seed: Random seed for generating domain randomizations.
+        """
+        rng = jax.random.key(seed)
+        rng, subrng = jax.random.split(rng)
+        subrngs = jax.random.split(subrng, self.num_randomizations)
+
+        # Create randomized versions of the model
+        randomizations = jax.vmap(self.task.domain_randomize_model)(subrngs)
+        self.model = self.task.model.tree_replace(randomizations)
+
+        # Keep track of which elements of the model have randomization
+        self.randomized_axes = jax.tree.map(lambda x: None, self.task.model)
+        self.randomized_axes = self.randomized_axes.tree_replace(
+            {key: 0 for key in randomizations.keys()}
+        )
 
     def optimize(self, state: mjx.Data, params: Any) -> Tuple[Any, Trajectory]:
         """Perform an optimization step to update the policy parameters.
@@ -86,12 +93,11 @@ class SamplingBasedController(ABC):
             Updated policy parameters
             Rollouts used to update the parameters
         """
-        # Sample random control sequences
+        # Sample and clip random control sequences
         controls, params = self.sample_controls(params)
         controls = jnp.clip(controls, self.task.u_min, self.task.u_max)
 
-        # Roll out the control sequences, applying domain randomizations and
-        # combining costs using self.risk_strategy.
+        # Roll out the control sequences with domain randomizations
         rng, dr_rng = jax.random.split(params.rng)
         rollouts = self.rollout_with_randomizations(state, controls, dr_rng)
         params = params.replace(rng=rng)
@@ -117,35 +123,37 @@ class SamplingBasedController(ABC):
             A Trajectory object containing the control, costs, and trace sites.
             Costs are aggregated over domains using the given risk strategy.
         """
-        # Set the initial state for each rollout.
+        # Initialize states for each rollout
         states = jax.vmap(lambda _, x: x, in_axes=(0, None))(
             jnp.arange(self.num_randomizations), state
         )
 
+        # Apply domain randomization to initial states if enabled
         if self.num_randomizations > 1:
-            # Randomize the initial states for each domain randomization
             subrngs = jax.random.split(rng, self.num_randomizations)
             randomizations = jax.vmap(self.task.domain_randomize_data)(states, subrngs)
             states = states.tree_replace(randomizations)
 
-        # Apply the control sequences, parallelized over both rollouts and
-        # domain randomizations.
+        # Apply control sequences across all domain randomizations
         _, rollouts = jax.vmap(
             self.eval_rollouts, in_axes=(self.randomized_axes, 0, None)
         )(self.model, states, controls)
 
-        # Combine the costs from different domain randomizations using the
-        # specified risk strategy.
+        # Combine costs from different domain randomizations
         costs = self.risk_strategy.combine_costs(rollouts.costs)
-        controls = rollouts.controls[0]  # identical over randomizations
-        trace_sites = rollouts.trace_sites[0]  # visualization only, take 1st
-        return rollouts.replace(costs=costs, controls=controls, trace_sites=trace_sites)
+
+        # Return combined trajectory
+        return Trajectory(
+            controls=rollouts.controls[0],  # identical over randomizations
+            costs=costs,
+            trace_sites=rollouts.trace_sites[0],  # visualization only
+        )
 
     @partial(jax.vmap, in_axes=(None, None, None, 0))
     def eval_rollouts(
         self, model: mjx.Model, state: mjx.Data, controls: jax.Array
     ) -> Tuple[mjx.Data, Trajectory]:
-        """Rollout control sequences (in parallel) and compute the costs.
+        """Rollout control sequences in parallel and compute costs.
 
         Args:
             model: The mujoco dynamics model to use.
@@ -163,107 +171,17 @@ class SamplingBasedController(ABC):
             """Compute the cost and observation, then advance the state."""
             x = mjx.forward(model, x)  # compute site positions
 
-            # Extract control and gains if optimizing gains
-            if self.task.control_mode == ControlMode.GENERAL:
-                cost = self.task.dt * self.task.running_cost(x, u)
-                sites = self.task.get_trace_sites(x)
-
-                # Advance the state for several steps, zero-order hold on control
-                x = jax.lax.fori_loop(
-                    0,
-                    self.task.sim_steps_per_control_step,
-                    lambda _, x: mjx.step(model, x),
-                    x.replace(ctrl=u),
-                )
-            elif self.task.control_mode == ControlMode.GENERAL_VI:
-                ctrl, p_gains, d_gains = self.task.extract_gains(u)
-
-                # Update the actuator gain parameters in the model
-                updated_model = model
-                updated_gainprm = updated_model.actuator_gainprm.at[
-                    : self.task.nu_ctrl, 0
-                ].set(p_gains)
-                updated_biasprm = (
-                    updated_model.actuator_biasprm.at[: self.task.nu_ctrl, 1]
-                    .set(-p_gains)
-                    .at[: self.task.nu_ctrl, 2]
-                    .set(-d_gains)
-                )
-                updated_model = updated_model.replace(
-                    actuator_gainprm=updated_gainprm, actuator_biasprm=updated_biasprm
-                )
-
-                cost = self.task.dt * self.task.running_cost(x, u)
-                sites = self.task.get_trace_sites(x)
-
-                # Advance the state with updated model and control
-                x = jax.lax.fori_loop(
-                    0,
-                    self.task.sim_steps_per_control_step,
-                    lambda _, x: mjx.step(updated_model, x),
-                    x.replace(ctrl=ctrl),
-                )
-            elif self.task.control_mode == ControlMode.CARTESIAN:
-                Kp = jnp.diag(jnp.array([300, 300, 300, 50, 50, 50], dtype=float))
-                Kd = 2.0 * jnp.sqrt(Kp)
-                tau = impedance_control_mjx(
-                    model,
-                    x,
-                    u[:3],
-                    u[3:],
-                    Kp,
-                    Kd,
-                    1.0,
-                    self.task.q_d_nullspace,
-                    self.task.ee_site_id,
-                )
-
-                cost = self.task.dt * self.task.running_cost(x, u)
-                sites = self.task.get_trace_sites(x)
-
-                # Advance the state
-                x = jax.lax.fori_loop(
-                    0,
-                    self.task.sim_steps_per_control_step,
-                    lambda _, x: mjx.step(model, x),
-                    x.replace(ctrl=tau[: model.nu]),
-                )
-
-            elif (
-                self.task.control_mode == ControlMode.CARTESIAN_VI
-                or self.task.control_mode == ControlMode.CARTESIAN_SIMPLE_VI
-            ):
-                ctrl, p_gain, d_gain = self.task.extract_gains(u)
-                tau = impedance_control_mjx(
-                    model,
-                    x,
-                    ctrl[:3],
-                    ctrl[3:],
-                    p_gain * jnp.identity(self.task.nu_ctrl),
-                    d_gain * jnp.identity(self.task.nu_ctrl),
-                    1.0,
-                    self.task.q_d_nullspace,
-                    self.task.ee_site_id,
-                )
-                cost = self.task.dt * self.task.running_cost(x, u)
-                sites = self.task.get_trace_sites(x)
-
-                # Advance the state
-                x = jax.lax.fori_loop(
-                    0,
-                    self.task.sim_steps_per_control_step,
-                    lambda _, x: mjx.step(model, x),
-                    x.replace(ctrl=tau),
-                )
-            else:
-                # Error if control mode is not supported
-                raise ValueError(f"Control mode {self.task.control_mode} not supported")
+            # Apply control based on control mode
+            cost, sites, x = self._apply_control_and_advance(model, x, u)
 
             return x, (x, cost, sites)
 
+        # Run simulation for all timesteps
         final_state, (states, costs, trace_sites) = jax.lax.scan(
             _scan_fn, state, controls
         )
+
+        # Add terminal cost and trace site
         final_cost = self.task.terminal_cost(final_state)
         final_trace_sites = self.task.get_trace_sites(final_state)
 
@@ -276,9 +194,161 @@ class SamplingBasedController(ABC):
             trace_sites=trace_sites,
         )
 
+    def _apply_control_and_advance(
+        self, model: mjx.Model, x: mjx.Data, u: jax.Array
+    ) -> Tuple[jax.Array, jax.Array, mjx.Data]:
+        """Apply control based on control mode and advance simulation.
+
+        Args:
+            model: The MuJoCo model.
+            x: Current state.
+            u: Control input.
+
+        Returns:
+            cost: Cost for this step.
+            sites: Trace site positions.
+            x: Advanced state.
+        """
+        control_mode = self.task.control_mode
+
+        if control_mode == ControlMode.GENERAL:
+            # Standard control mode - direct control application
+            cost = self.task.dt * self.task.running_cost(x, u)
+            sites = self.task.get_trace_sites(x)
+
+            # Advance state
+            x = jax.lax.fori_loop(
+                0,
+                self.task.sim_steps_per_control_step,
+                lambda _, x: mjx.step(model, x),
+                x.replace(ctrl=u),
+            )
+
+        elif control_mode == ControlMode.GENERAL_VI:
+            # Variable impedance control mode
+            ctrl, p_gains, d_gains = self.task.extract_gains(u)
+
+            # Update model with gains
+            updated_model = self._update_model_gains(model, p_gains, d_gains)
+
+            cost = self.task.dt * self.task.running_cost(x, u)
+            sites = self.task.get_trace_sites(x)
+
+            # Advance state with updated model
+            x = jax.lax.fori_loop(
+                0,
+                self.task.sim_steps_per_control_step,
+                lambda _, x: mjx.step(updated_model, x),
+                x.replace(ctrl=ctrl),
+            )
+
+        elif control_mode == ControlMode.CARTESIAN:
+            # Cartesian impedance control with fixed gains
+            Kp = jnp.diag(
+                jnp.array(
+                    [
+                        self.task.trans_p,
+                        self.task.trans_p,
+                        self.task.trans_p,
+                        self.task.rot_p,
+                        self.task.rot_p,
+                        self.task.rot_p,
+                    ],
+                    dtype=float,
+                )
+            )
+            Kd = 2.0 * jnp.sqrt(Kp)
+            tau = impedance_control_mjx(
+                model,
+                x,
+                u[:3],
+                u[3:],
+                Kp,
+                Kd,
+                self.task.nullspace_stiffness,
+                self.task.q_d_nullspace,
+                self.task.ee_site_id,
+            )
+
+            cost = self.task.dt * self.task.running_cost(x, u)
+            sites = self.task.get_trace_sites(x)
+
+            # Advance state
+            x = jax.lax.fori_loop(
+                0,
+                self.task.sim_steps_per_control_step,
+                lambda _, x: mjx.step(model, x),
+                x.replace(ctrl=tau[: model.nu]),
+            )
+
+        elif control_mode in [
+            ControlMode.CARTESIAN_VI,
+            ControlMode.CARTESIAN_SIMPLE_VI,
+        ]:
+            # Cartesian variable impedance control
+            ctrl, p_gain, d_gain = self.task.extract_gains(u)
+            tau = impedance_control_mjx(
+                model,
+                x,
+                ctrl[:3],
+                ctrl[3:],
+                jnp.diag(p_gain),
+                jnp.diag(d_gain),
+                self.task.nullspace_stiffness,
+                self.task.q_d_nullspace,
+                self.task.ee_site_id,
+            )
+
+            cost = self.task.dt * self.task.running_cost(x, u)
+            sites = self.task.get_trace_sites(x)
+
+            # Advance state
+            x = jax.lax.fori_loop(
+                0,
+                self.task.sim_steps_per_control_step,
+                lambda _, x: mjx.step(model, x),
+                x.replace(ctrl=tau),
+            )
+
+        else:
+            # Unsupported control mode
+            raise ValueError(f"Control mode {control_mode} not supported")
+
+        return cost, sites, x
+
+    def _update_model_gains(
+        self, model: mjx.Model, p_gains: jax.Array, d_gains: jax.Array
+    ) -> mjx.Model:
+        """Update model with new gains for variable impedance control.
+
+        Args:
+            model: The MuJoCo model to update.
+            p_gains: Position gains.
+            d_gains: Damping gains.
+
+        Returns:
+            Updated model with new gains.
+        """
+        updated_gainprm = model.actuator_gainprm.at[: self.task.nu_ctrl, 0].set(p_gains)
+
+        updated_biasprm = (
+            model.actuator_biasprm.at[: self.task.nu_ctrl, 1]
+            .set(-p_gains)
+            .at[: self.task.nu_ctrl, 2]
+            .set(-d_gains)
+        )
+
+        return model.replace(
+            actuator_gainprm=updated_gainprm, actuator_biasprm=updated_biasprm
+        )
+
+    # Abstract methods to be implemented by subclasses
     @abstractmethod
     def init_params(self, initial_control: jax.Array = None) -> Any:
         """Initialize the policy parameters, U = [u₀, u₁, ... ] ~ π(params).
+
+        Args:
+            initial_control: Optional initial control to initialize parameters.
 
         Returns:
             The initial policy parameters.

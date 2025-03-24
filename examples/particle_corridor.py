@@ -7,8 +7,8 @@ import numpy as np
 from hydrax.algs import MPPI, Evosax, PredictiveSampling
 from hydrax.simulation.deterministic import run_interactive
 from hydrax.tasks.particle_corridor import ParticleCorridor
-from hydrax.task_base import GainOptimizationMode
-from parse_args import parse_args
+from hydrax.task_base import ControlMode
+from parse_args import parse_args, control_mode_map
 
 """
 Run an interactive simulation of the particle pushing a box out of an enclosed room.
@@ -22,27 +22,17 @@ without letting either the particle or box touch the walls.
 def main():
     args = parse_args()
 
-    # Map the gain mode string to the enum
-    gain_mode_map = {
-        "none": GainOptimizationMode.NONE,
-        "individual": GainOptimizationMode.INDIVIDUAL,
-        "simple": GainOptimizationMode.SIMPLE,
-    }
-    gain_mode = gain_mode_map[args.gain_mode]
+    # Map the control mode string to the enum
+    control_mode = control_mode_map[args.control_mode]
 
     # Define the task (cost and dynamics)
-    task = ParticleCorridor(gain_mode=gain_mode)
+    task = ParticleCorridor(control_mode=control_mode)
 
     # Print control dimensions
-    if gain_mode == GainOptimizationMode.INDIVIDUAL:
-        print(
-            f"Control dimensions: {task.nu_ctrl} (controls) + {2 * task.nu_ctrl} (gains) = {task.nu_total}"
-        )
-    elif gain_mode == GainOptimizationMode.SIMPLE:
-        # Not supported for this task
-        raise ValueError("Simple gain mode not supported for this task")
-    else:
-        print(f"Control dimensions: {task.model.nu}")
+    print(f"Control mode: {control_mode}")
+    print(
+        f"Control dimensions: {task.nu_ctrl} (controls) + {task.nu_total - task.nu_ctrl} (gains) = {task.nu_total}"
+    )
 
     # Set the controller based on command-line arguments
     if args.algorithm == "ps" or args.algorithm is None:
@@ -55,18 +45,17 @@ def main():
 
     elif args.algorithm == "mppi":
         print("Running MPPI")
-        if gain_mode == GainOptimizationMode.INDIVIDUAL:
+        if control_mode == ControlMode.GENERAL_VI:
             ctrl = MPPI(
                 task,
                 num_samples=200,
                 noise_level=np.array([0.01, 0.01, 1, 1, 1, 1]),
                 temperature=0.001,
             )
-        elif gain_mode == GainOptimizationMode.SIMPLE:
-            # Not supported for this task
-            raise ValueError("Simple gain mode not supported for this task")
-        else:
+        elif control_mode == ControlMode.GENERAL:
             ctrl = MPPI(task, num_samples=2000, noise_level=0.05, temperature=0.001)
+        else:
+            raise ValueError(f"Control mode {control_mode} not supported for this task")
 
     elif args.algorithm == "cmaes":
         print("Running CMA-ES")

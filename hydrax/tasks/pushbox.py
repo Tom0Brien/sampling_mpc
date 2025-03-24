@@ -6,7 +6,7 @@ import mujoco
 from mujoco import mjx
 
 from hydrax import ROOT
-from hydrax.task_base import Task, GainOptimizationMode
+from hydrax.task_base import Task, ControlMode
 
 
 class PushBox(Task):
@@ -16,7 +16,7 @@ class PushBox(Task):
         self,
         planning_horizon: int = 20,
         sim_steps_per_control_step: int = 5,
-        gain_mode: GainOptimizationMode = GainOptimizationMode.NONE,
+        control_mode: ControlMode = ControlMode.GENERAL,
     ):
         """Load the MuJoCo model and set task parameters.
 
@@ -27,28 +27,35 @@ class PushBox(Task):
         """
         mj_model = mujoco.MjModel.from_xml_path(ROOT + "/models/pushbox/scene.xml")
 
-        # Define custom gain limits for this task
-        gain_limits = {
-            # INDIVIDUAL mode limits
-            "p_min": 5.0,
-            "p_max": 50.0,
-            "d_min": 1.0,
-            "d_max": 20.0,
-            # SIMPLE mode limits
-            "trans_p_min": 5.0,
-            "trans_p_max": 50.0,
-            "rot_p_min": 5.0,
-            "rot_p_max": 50.0,
-        }
-
         super().__init__(
             mj_model,
             planning_horizon=planning_horizon,
             sim_steps_per_control_step=sim_steps_per_control_step,
             trace_sites=["pusher"],
-            gain_mode=gain_mode,
-            gain_limits=gain_limits,
+            control_mode=control_mode,
         )
+
+        # Setup config
+        self.config = {
+            # Gain limits for GENERAL_VI mode
+            "p_min": 5.0,
+            "p_max": 30.0,
+            "d_min": 1.0,
+            "d_max": 10.0,
+            # Gain limits for CARTESIAN_SIMPLE_VI mode
+            "trans_p_min": 5.0,
+            "trans_p_max": 30.0,
+            "rot_p_min": 5.0,
+            "rot_p_max": 30.0,
+            # Fixed gains for CARTESIAN mode
+            "trans_p": 300.0,
+            "rot_p": 50.0,
+            # Control limits for CARTESIAN modes
+            "pos_min": [0, -1.0, 0.3],  # x, y, z
+            "pos_max": [1.0, 1.0, 1.0],
+            "rot_min": [-3.14, -3.14, -3.14],  # roll, pitch, yaw
+            "rot_max": [3.14, 3.14, 3.14],
+        }
 
         # Get sensor ids
         self.block_position_sensor = mujoco.mj_name2id(

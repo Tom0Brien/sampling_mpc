@@ -13,7 +13,8 @@ from matplotlib import pyplot as plt
 
 from hydrax.algs import MPPI, PredictiveSampling
 from hydrax.tasks.franka_reach import FrankaReach
-from hydrax.tasks.franka_reach import GainOptimizationMode
+from hydrax.task_base import ControlMode
+from parse_args import control_mode_map
 
 """
 Control loop for Franka robot using ROS for communication and Hydrax for control.
@@ -24,7 +25,7 @@ actions using a sampling-based controller, and sends commands to the robot.
 
 class FrankaRosControl:
     def __init__(
-        self, host="localhost", port=9090, controller_type="ps", gain_mode="none"
+        self, host="localhost", port=9090, controller_type="ps", control_mode="general"
     ):
         # ROS connection
         self.client = roslibpy.Ros(host=host, port=port)
@@ -72,16 +73,11 @@ class FrankaRosControl:
         self.current_joint_velocities = None
         self.current_end_effector_pose = None
 
-        # Map gain_mode string to GainOptimizationMode enum
-        gain_mode_map = {
-            "none": GainOptimizationMode.NONE,
-            "individual": GainOptimizationMode.INDIVIDUAL,
-            "simple": GainOptimizationMode.SIMPLE,
-        }
-        gain_mode_enum = gain_mode_map.get(gain_mode, GainOptimizationMode.NONE)
+        # Map control_mode string to ControlMode enum
+        control_mode_enum = control_mode_map[control_mode]
 
         # Initialize the Hydrax task and controller
-        self.task = FrankaReach(gain_mode=gain_mode_enum)
+        self.task = FrankaReach(control_mode=control_mode_enum)
         self.mj_model = self.task.mj_model
         self.mj_data = mujoco.MjData(self.mj_model)
         self.mjx_data = mjx.put_data(self.mj_model, self.mj_data)
@@ -102,19 +98,22 @@ class FrankaRosControl:
             )
         elif controller_type == "mppi":
             print("Using MPPI controller")
-            noise_level = 0.01
-            if gain_mode_enum == GainOptimizationMode.SIMPLE:
-                # Set noise levels for position, orientation, and gains
-                noise_level = np.array(
-                    [0.01] * 6 + [1] + [1]
-                )  # 6 pose params + 2 gain params
-
-            self.controller = MPPI(
-                self.task,
-                num_samples=2000,
-                noise_level=noise_level,
-                temperature=0.001,
-            )
+            if control_mode_enum == ControlMode.GENERAL:
+                self.controller = MPPI(
+                    self.task,
+                    num_samples=2000,
+                    noise_level=0.01,
+                    temperature=0.001,
+                )
+            if control_mode_enum == ControlMode.CARTESIAN_SIMPLE_VI:
+                self.controller = MPPI(
+                    self.task,
+                    num_samples=2000,
+                    noise_level=np.array(
+                        [0.01] * 6 + [1] + [1]
+                    ),  # 6 pose + 2 gain params
+                    temperature=0.001,
+                )
         else:
             raise ValueError(f"Unsupported controller type: {controller_type}")
 
@@ -348,7 +347,7 @@ class FrankaRosControl:
                 cost_history.append(total_cost)
 
                 # Handle the case where the action includes gains
-                if self.task.gain_mode == GainOptimizationMode.SIMPLE:
+                if self.task.control_mode == ControlMode.CARTESIAN_SIMPLE_VI:
                     # Extract control and gains
                     pose_command, p_gains, d_gains = self.task.extract_gains(action)
                     print(f"Sending pose: {pose_command}")
@@ -412,8 +411,8 @@ class FrankaRosControl:
                     geom.label = f"Cost: {total_cost:.4f}"
                     viewer.user_scn.ngeom += 1
 
-                    # Add gain visualization if in simple gain mode
-                    if self.task.gain_mode == GainOptimizationMode.SIMPLE:
+                    # Add gain visualization if in variable impedance control mode
+                    if self.task.control_mode == ControlMode.CARTESIAN_SIMPLE_VI:
                         # Format gain text
                         trans_p_gain = action[self.task.nu_ctrl]
                         rot_p_gain = action[self.task.nu_ctrl + 1]
@@ -520,7 +519,11 @@ class FrankaRosControl:
                     # Create figure with multiple subplots
                     fig, axes = plt.subplots(
                         1
-                        + (2 if self.task.gain_mode != GainOptimizationMode.NONE else 0)
+                        + (
+                            2
+                            if self.task.control_mode == ControlMode.CARTESIAN_SIMPLE_VI
+                            else 0
+                        )
                         + 1,
                         1,
                         figsize=(10, 10),
@@ -528,7 +531,7 @@ class FrankaRosControl:
                     )
 
                     # If not optimizing gains, axes is not a list, so make it one for consistency
-                    if self.task.gain_mode == GainOptimizationMode.NONE:
+                    if self.task.control_mode != ControlMode.CARTESIAN_SIMPLE_VI:
                         axes = [axes] if not isinstance(axes, np.ndarray) else axes
 
                     # Plot cost history
@@ -539,7 +542,7 @@ class FrankaRosControl:
 
                     # Plot gain histories if optimizing gains
                     if (
-                        self.task.gain_mode != GainOptimizationMode.NONE
+                        self.task.control_mode == ControlMode.CARTESIAN_SIMPLE_VI
                         and p_gain_history
                         and d_gain_history
                     ):
@@ -616,11 +619,11 @@ def main():
         help="Controller type (ps for Predictive Sampling, mppi for MPPI)",
     )
     parser.add_argument(
-        "--gain-mode",
+        "--control-mode",
         type=str,
-        choices=["none", "individual", "simple"],
-        default="none",
-        help="Gain optimization mode (none, individual, or simple)",
+        choices=["general", "cartesian_simple_vi"],
+        default="general",
+        help="Control mode (general for general control, CARTESIAN_SIMPLE_VI for cartesian impedance control with variable gains)",
     )
     parser.add_argument(
         "--enable-viewer",
@@ -641,7 +644,7 @@ def main():
         host=args.host,
         port=args.port,
         controller_type=args.controller,
-        gain_mode=args.gain_mode,
+        control_mode=args.control_mode,
     )
 
     controller.run_control_loop(

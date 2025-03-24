@@ -27,24 +27,17 @@ class FrankaReach(Task):
             control_mode: The control mode to use.
                           CARTESIAN_SIMPLE_VI is recommended for Franka as it optimizes
                           only translational and rotational p-gains with d-gains automatically set.
+            config: Optional dictionary with gain and control limit configurations. May include:
+                         For GENERAL_VI mode:
+                           'p_min', 'p_max', 'd_min', 'd_max'
+                         For CARTESIAN_SIMPLE_VI mode:
+                           'trans_p_min', 'trans_p_max', 'rot_p_min', 'rot_p_max'
+                         For CARTESIAN mode (fixed gains and limits):
+                           'trans_p', 'rot_p', 'pos_min', 'pos_max', 'rot_min', 'rot_max'
         """
         mj_model = mujoco.MjModel.from_xml_path(
             ROOT + "/models/franka_emika_panda/mjx_scene_reach.xml"
         )
-
-        # Define custom gain limits for Franka
-        gain_limits = {
-            # INDIVIDUAL mode limits
-            "p_min": 15.0,
-            "p_max": 30.0,
-            "d_min": 5.0,
-            "d_max": 20.0,
-            # SIMPLE mode limits
-            "trans_p_min": 90.0,
-            "trans_p_max": 310.0,
-            "rot_p_min": 15.0,
-            "rot_p_max": 60.0,
-        }
 
         super().__init__(
             mj_model,
@@ -52,8 +45,29 @@ class FrankaReach(Task):
             sim_steps_per_control_step=sim_steps_per_control_step,
             trace_sites=["gripper"],
             control_mode=control_mode,
-            gain_limits=gain_limits,
         )
+
+        # Setup config
+        self.config = {
+            # Gain limits for GENERAL_VI mode
+            "p_min": 5.0,
+            "p_max": 30.0,
+            "d_min": 1.0,
+            "d_max": 10.0,
+            # Gain limits for CARTESIAN_SIMPLE_VI mode
+            "trans_p_min": 5.0,
+            "trans_p_max": 30.0,
+            "rot_p_min": 5.0,
+            "rot_p_max": 30.0,
+            # Fixed gains for CARTESIAN mode
+            "trans_p": 300.0,
+            "rot_p": 50.0,
+            # Control limits for CARTESIAN modes
+            "pos_min": [0, -1.0, 0.3],  # x, y, z
+            "pos_max": [1.0, 1.0, 1.0],
+            "rot_min": [-3.14, -3.14, -3.14],  # roll, pitch, yaw
+            "rot_max": [3.14, 3.14, 3.14],
+        }
 
         self.ee_site_id = mj_model.site("gripper").id
         self.reference_id = mj_model.site("reference").id

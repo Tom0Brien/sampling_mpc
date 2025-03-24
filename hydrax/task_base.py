@@ -1,6 +1,6 @@
 from enum import Enum, auto
 from abc import ABC, abstractmethod
-from typing import Dict, Sequence, Tuple, Optional
+from typing import Dict, Sequence, Tuple, Optional, Any
 
 import jax
 import jax.numpy as jnp
@@ -42,7 +42,6 @@ class Task(ABC):
         sim_steps_per_control_step: int,
         trace_sites: Sequence[str] = [],
         control_mode: ControlMode = ControlMode.GENERAL,
-        gain_limits: Optional[Dict[str, float]] = None,
     ):
         """Set the model and simulation parameters.
 
@@ -53,9 +52,17 @@ class Task(ABC):
                                         for each control step.
             trace_sites: A list of site names to visualize with traces.
             control_mode: The control mode to use.
-            gain_limits: Optional dictionary with custom gain limits. Keys can include:
-                         'p_min', 'p_max', 'd_min', 'd_max' for INDIVIDUAL mode
-                         'trans_p_min', 'trans_p_max', 'rot_p_min', 'rot_p_max' for SIMPLE mode
+            config: Optional dictionary with gain and control limit configurations. May include:
+                         For GENERAL_VI mode:
+                           'p_min', 'p_max', 'd_min', 'd_max'
+                         For CARTESIAN_VI mode:
+                           'p_min', 'p_max', 'd_min', 'd_max'
+                         For CARTESIAN_SIMPLE_VI mode:
+                           'trans_p_min', 'trans_p_max', 'rot_p_min', 'rot_p_max'
+                         For CARTESIAN mode (fixed gains):
+                           'trans_p', 'rot_p'
+                         Control limits for cartesian modes:
+                           'pos_min', 'pos_max', 'rot_min', 'rot_max'
         """
         assert isinstance(mj_model, mujoco.MjModel)
         self.mj_model = mj_model
@@ -64,21 +71,27 @@ class Task(ABC):
         self.sim_steps_per_control_step = sim_steps_per_control_step
         self.control_mode = control_mode
 
-        # Default gain limits
-        self._default_gain_limits = {
-            # INDIVIDUAL mode defaults
+        # Default gain and control limit configurations
+        self.config = {
+            # Gain limits for GENERAL_VI mode
             "p_min": 5.0,
             "p_max": 30.0,
             "d_min": 1.0,
             "d_max": 10.0,
-            # SIMPLE mode defaults
+            # Gain limits for CARTESIAN_SIMPLE_VI mode
             "trans_p_min": 5.0,
             "trans_p_max": 30.0,
             "rot_p_min": 5.0,
             "rot_p_max": 30.0,
+            # Fixed gains for CARTESIAN mode
+            "trans_p": 300.0,
+            "rot_p": 50.0,
+            # Control limits for CARTESIAN modes
+            "pos_min": [0, -1.0, 0.3],  # x, y, z
+            "pos_max": [1.0, 1.0, 1.0],
+            "rot_min": [-3.14, -3.14, -3.14],  # roll, pitch, yaw
+            "rot_max": [3.14, 3.14, 3.14],
         }
-        if gain_limits:
-            self._default_gain_limits.update(gain_limits)
 
         # For cartesian control modes, set default end-effector site ID
         # This should be overridden by subclasses
@@ -88,103 +101,8 @@ class Task(ABC):
         self.q_d_nullspace = jnp.zeros(mj_model.nv)
         self.nullspace_stiffness = 1.0
 
-        # Original control dimensions and limits setup
-        if self.control_mode == ControlMode.GENERAL:
-            self.nu_ctrl = mj_model.nu
-            self.nu_total = mj_model.nu
-            self.u_min = jnp.where(
-                mj_model.actuator_ctrllimited,
-                mj_model.actuator_ctrlrange[:, 0],
-                -jnp.inf,
-            )
-            self.u_max = jnp.where(
-                mj_model.actuator_ctrllimited,
-                mj_model.actuator_ctrlrange[:, 1],
-                jnp.inf,
-            )
-        elif self.control_mode == ControlMode.CARTESIAN:
-            self.nu_ctrl = 6  # 3D position and orientation of end-effector
-            self.nu_total = 6
-            self.u_min = jnp.array([-1, -1, -1, -3.14, -3.14, -3.14])
-            self.u_max = jnp.array([1, 1, 1, 3.14, 3.14, 3.14])
-        elif self.control_mode == ControlMode.GENERAL_VI:
-            self.nu_ctrl = mj_model.nu
-            self.nu_total = mj_model.nu * 3  # Control + p_gains + d_gains
-
-            # Set gain limits based on defaults or custom values
-            self.p_gain_min = jnp.ones(mj_model.nu) * self._default_gain_limits["p_min"]
-            self.p_gain_max = jnp.ones(mj_model.nu) * self._default_gain_limits["p_max"]
-            self.d_gain_min = jnp.ones(mj_model.nu) * self._default_gain_limits["d_min"]
-            self.d_gain_max = jnp.ones(mj_model.nu) * self._default_gain_limits["d_max"]
-
-            # Control limits
-            ctrl_min = jnp.where(
-                mj_model.actuator_ctrllimited,
-                mj_model.actuator_ctrlrange[:, 0],
-                -jnp.inf,
-            )
-            ctrl_max = jnp.where(
-                mj_model.actuator_ctrllimited,
-                mj_model.actuator_ctrlrange[:, 1],
-                jnp.inf,
-            )
-
-            # Extend control limits to include gains
-            self.u_min = jnp.concatenate([ctrl_min, self.p_gain_min, self.d_gain_min])
-            self.u_max = jnp.concatenate([ctrl_max, self.p_gain_max, self.d_gain_max])
-
-        elif self.control_mode == ControlMode.CARTESIAN_VI:
-            self.nu_ctrl = 6
-            self.nu_total = 6 * 3  # 6 cartesian + 6 p_gains + 6 d_gains
-
-            # Set gain limits
-            self.p_gain_min = jnp.ones(6) * self._default_gain_limits["p_min"]
-            self.p_gain_max = jnp.ones(6) * self._default_gain_limits["p_max"]
-            self.d_gain_min = jnp.ones(6) * self._default_gain_limits["d_min"]
-            self.d_gain_max = jnp.ones(6) * self._default_gain_limits["d_max"]
-
-            # Extend control limits to include gains
-            self.u_min = jnp.concatenate(
-                [
-                    jnp.array([-1, -1, -1, -3.14, -3.14, -3.14]),  # Cartesian limits
-                    self.p_gain_min,
-                    self.d_gain_min,
-                ]
-            )
-            self.u_max = jnp.concatenate(
-                [
-                    jnp.array([1, 1, 1, 3.14, 3.14, 3.14]),  # Cartesian limits
-                    self.p_gain_max,
-                    self.d_gain_max,
-                ]
-            )
-
-        elif self.control_mode == ControlMode.CARTESIAN_SIMPLE_VI:
-            self.nu_ctrl = 6
-            self.nu_total = 6 + 2  # 6 cartesian + trans_p_gain + rot_p_gain
-
-            # Set simple gain limits
-            self.trans_p_gain_min = self._default_gain_limits["trans_p_min"]
-            self.trans_p_gain_max = self._default_gain_limits["trans_p_max"]
-            self.rot_p_gain_min = self._default_gain_limits["rot_p_min"]
-            self.rot_p_gain_max = self._default_gain_limits["rot_p_max"]
-
-            # Extend control limits to include gains
-            self.u_min = jnp.concatenate(
-                [
-                    jnp.array([-1, -1, -1, -3.14, -3.14, -3.14]),  # Cartesian limits
-                    jnp.array([self.trans_p_gain_min, self.rot_p_gain_min]),
-                ]
-            )
-            self.u_max = jnp.concatenate(
-                [
-                    jnp.array([1, 1, 1, 3.14, 3.14, 3.14]),  # Cartesian limits
-                    jnp.array([self.trans_p_gain_max, self.rot_p_gain_max]),
-                ]
-            )
-
-        else:
-            raise ValueError(f"Invalid control mode: {self.control_mode}")
+        # Configure control dimensions and limits based on control mode
+        self._configure_control_dimensions()
 
         # Timestep for each control step
         self.dt = mj_model.opt.timestep * sim_steps_per_control_step
@@ -192,6 +110,126 @@ class Task(ABC):
         # Get site IDs for points we want to trace
         self.trace_site_ids = jnp.array(
             [mj_model.site(name).id for name in trace_sites]
+        )
+
+    def _configure_control_dimensions(self):
+        """Set up control dimensions and limits based on control mode"""
+        if self.control_mode == ControlMode.GENERAL:
+            self._setup_general_control()
+        elif self.control_mode == ControlMode.GENERAL_VI:
+            self._setup_general_vi_control()
+        elif self.control_mode == ControlMode.CARTESIAN:
+            self._setup_cartesian_control()
+        elif self.control_mode == ControlMode.CARTESIAN_VI:
+            self._setup_cartesian_vi_control()
+        elif self.control_mode == ControlMode.CARTESIAN_SIMPLE_VI:
+            self._setup_cartesian_simple_vi_control()
+        else:
+            raise ValueError(f"Invalid control mode: {self.control_mode}")
+
+    def _setup_general_control(self):
+        """Setup for standard control mode"""
+        self.nu_ctrl = self.mj_model.nu
+        self.nu_total = self.mj_model.nu
+        self.u_min = jnp.where(
+            self.mj_model.actuator_ctrllimited,
+            self.mj_model.actuator_ctrlrange[:, 0],
+            -jnp.inf,
+        )
+        self.u_max = jnp.where(
+            self.mj_model.actuator_ctrllimited,
+            self.mj_model.actuator_ctrlrange[:, 1],
+            jnp.inf,
+        )
+
+    def _setup_general_vi_control(self):
+        """Setup for general variable impedance control"""
+        self.nu_ctrl = self.mj_model.nu
+        self.nu_total = self.mj_model.nu * 3  # Control + p_gains + d_gains
+
+        # Set gain limits based on config
+        self.p_gain_min = jnp.ones(self.mj_model.nu) * self.config["p_min"]
+        self.p_gain_max = jnp.ones(self.mj_model.nu) * self.config["p_max"]
+        self.d_gain_min = jnp.ones(self.mj_model.nu) * self.config["d_min"]
+        self.d_gain_max = jnp.ones(self.mj_model.nu) * self.config["d_max"]
+
+        # Control limits
+        ctrl_min = jnp.where(
+            self.mj_model.actuator_ctrllimited,
+            self.mj_model.actuator_ctrlrange[:, 0],
+            -jnp.inf,
+        )
+        ctrl_max = jnp.where(
+            self.mj_model.actuator_ctrllimited,
+            self.mj_model.actuator_ctrlrange[:, 1],
+            jnp.inf,
+        )
+
+        # Extend control limits to include gains
+        self.u_min = jnp.concatenate([ctrl_min, self.p_gain_min, self.d_gain_min])
+        self.u_max = jnp.concatenate([ctrl_max, self.p_gain_max, self.d_gain_max])
+
+    def _setup_cartesian_control(self):
+        """Setup for cartesian impedance control"""
+        self.nu_ctrl = 6  # 3D position and orientation of end-effector
+        self.nu_total = 6
+        self.u_min = jnp.array(self.config["pos_min"] + self.config["rot_min"])
+        self.u_max = jnp.array(self.config["pos_max"] + self.config["rot_max"])
+
+        # Set fixed gains from config
+        self.trans_p = self.config["trans_p"]
+        self.rot_p = self.config["rot_p"]
+
+    def _setup_cartesian_vi_control(self):
+        """Setup for cartesian variable impedance control"""
+        self.nu_ctrl = 6
+        self.nu_total = 6 * 3  # 6 cartesian + 6 p_gains + 6 d_gains
+
+        # Set gain limits from config
+        self.p_gain_min = jnp.ones(6) * self.config["p_min"]
+        self.p_gain_max = jnp.ones(6) * self.config["p_max"]
+        self.d_gain_min = jnp.ones(6) * self.config["d_min"]
+        self.d_gain_max = jnp.ones(6) * self.config["d_max"]
+
+        # Extend control limits to include gains
+        self.u_min = jnp.concatenate(
+            [
+                jnp.array(self.config["pos_min"] + self.config["rot_min"]),
+                self.p_gain_min,
+                self.d_gain_min,
+            ]
+        )
+        self.u_max = jnp.concatenate(
+            [
+                jnp.array(self.config["pos_max"] + self.config["rot_max"]),
+                self.p_gain_max,
+                self.d_gain_max,
+            ]
+        )
+
+    def _setup_cartesian_simple_vi_control(self):
+        """Setup for cartesian simple variable impedance control"""
+        self.nu_ctrl = 6
+        self.nu_total = 6 + 2  # 6 cartesian + trans_p_gain + rot_p_gain
+
+        # Set simple gain limits from config
+        self.trans_p_gain_min = self.config["trans_p_min"]
+        self.trans_p_gain_max = self.config["trans_p_max"]
+        self.rot_p_gain_min = self.config["rot_p_min"]
+        self.rot_p_gain_max = self.config["rot_p_max"]
+
+        # Extend control limits to include gains
+        self.u_min = jnp.concatenate(
+            [
+                jnp.array(self.config["pos_min"] + self.config["rot_min"]),
+                jnp.array([self.trans_p_gain_min, self.rot_p_gain_min]),
+            ]
+        )
+        self.u_max = jnp.concatenate(
+            [
+                jnp.array(self.config["pos_max"] + self.config["rot_max"]),
+                jnp.array([self.trans_p_gain_max, self.rot_p_gain_max]),
+            ]
         )
 
     @abstractmethod

@@ -21,26 +21,35 @@ class Particle(Task):
         """Load the MuJoCo model and set task parameters."""
         mj_model = mujoco.MjModel.from_xml_path(ROOT + "/models/particle/scene.xml")
 
-        # Define custom gain limits for this task
-        gain_limits = {
-            "p_min": 1.0,
-            "p_max": 50.0,
-            "d_min": 1.0,
-            "d_max": 50.0,
-            "trans_p_min": 1.0,
-            "trans_p_max": 50.0,
-            "rot_p_min": 1.0,
-            "rot_p_max": 50.0,
-        }
-
         super().__init__(
             mj_model,
             planning_horizon=planning_horizon,
             sim_steps_per_control_step=sim_steps_per_control_step,
             trace_sites=["particle"],
             control_mode=control_mode,
-            gain_limits=gain_limits,
         )
+
+        # Setup config
+        self.config = {
+            # Gain limits for GENERAL_VI mode
+            "p_min": 5.0,
+            "p_max": 30.0,
+            "d_min": 1.0,
+            "d_max": 10.0,
+            # Gain limits for CARTESIAN_SIMPLE_VI mode
+            "trans_p_min": 5.0,
+            "trans_p_max": 30.0,
+            "rot_p_min": 5.0,
+            "rot_p_max": 30.0,
+            # Fixed gains for CARTESIAN mode
+            "trans_p": 300.0,
+            "rot_p": 50.0,
+            # Control limits for CARTESIAN modes
+            "pos_min": [0, -1.0, 0.3],  # x, y, z
+            "pos_max": [1.0, 1.0, 1.0],
+            "rot_min": [-3.14, -3.14, -3.14],  # roll, pitch, yaw
+            "rot_max": [3.14, 3.14, 3.14],
+        }
 
         self.particle_id = mj_model.site("particle").id
         self.reference_id = mj_model.site("reference").id
