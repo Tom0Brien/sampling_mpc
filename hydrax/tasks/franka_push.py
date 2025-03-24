@@ -62,7 +62,8 @@ class FrankaPush(Task):
             "rot_max": [3.14, 3.14, 3.14],
         }
 
-        self.gripper_id = mj_model.site("gripper").id
+        self.ee_site_id = mj_model.site("gripper").id
+        self.reference_id = mj_model.site("reference").id
         self.box_id = mj_model.body("box").id
         self.box_site_id = mj_model.site("box_site").id
         self.reference_id = mj_model.site("reference").id
@@ -101,11 +102,11 @@ class FrankaPush(Task):
         # Calculate desired gripper position: 5cm back from box along this direction
         desired_gripper_pos = current_box_pos - 0.05 * direction  # 5cm offset
 
-        gripper_pos = state.site_xpos[self.gripper_id]
+        gripper_pos = state.site_xpos[self.ee_site_id]
         box_to_gripper_cost = jnp.sum(jnp.square(gripper_pos - desired_gripper_pos))
 
         # Desired gripper orientation (roll and pitch, yaw should be able to vary)
-        gripper_rot = state.site_xmat[self.gripper_id].reshape((3, 3))
+        gripper_rot = state.site_xmat[self.ee_site_id].reshape((3, 3))
         gripper_rpy = mat_to_rpy(gripper_rot)
         gripper_orientation_cost = jnp.sum(
             jnp.square(gripper_rpy[:2] - jnp.array([-3.14, 0.0]))
