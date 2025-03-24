@@ -175,7 +175,7 @@ class SamplingBasedController(ABC):
                     lambda _, x: mjx.step(model, x),
                     x.replace(ctrl=u),
                 )
-            elif self.task.control_mode == ControlMode.GENERAL_VARIABLE_IMPEDANCE:
+            elif self.task.control_mode == ControlMode.GENERAL_VI:
                 ctrl, p_gains, d_gains = self.task.extract_gains(u)
 
                 # Update the actuator gain parameters in the model
@@ -230,9 +230,8 @@ class SamplingBasedController(ABC):
                 )
 
             elif (
-                self.task.control_mode == ControlMode.CARTESIAN_VARIABLE_IMPEDANCE
-                or self.task.control_mode
-                == ControlMode.CARTESIAN_SIMPLE_VARIABLE_IMPEDANCE
+                self.task.control_mode == ControlMode.CARTESIAN_VI
+                or self.task.control_mode == ControlMode.CARTESIAN_SIMPLE_VI
             ):
                 ctrl, p_gain, d_gain = self.task.extract_gains(u)
                 tau = impedance_control_mjx(

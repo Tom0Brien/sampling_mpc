@@ -25,7 +25,7 @@ class FrankaPush(Task):
             planning_horizon: The number of control steps (T) to plan over.
             sim_steps_per_control_step: The number of simulation steps per control step.
             control_mode: The control mode to use.
-                          CARTESIAN_SIMPLE_VARIABLE_IMPEDANCE is recommended for Franka as it optimizes
+                          CARTESIAN_SIMPLE_VI is recommended for Franka as it optimizes
                           only translational and rotational p-gains with d-gains automatically set.
         """
         mj_model = mujoco.MjModel.from_xml_path(

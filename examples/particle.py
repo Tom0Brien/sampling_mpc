@@ -43,14 +43,14 @@ def main():
 
     elif args.algorithm == "mppi":
         print("Running MPPI")
-        if control_mode == ControlMode.GENERAL_VARIABLE_IMPEDANCE:
+        if control_mode == ControlMode.GENERAL_VI:
             ctrl = MPPI(
                 task,
                 num_samples=1000,
                 noise_level=np.array([0.01, 0.01, 1, 1, 1, 1]),
                 temperature=0.001,
             )
-        elif control_mode == ControlMode.CARTESIAN_SIMPLE_VARIABLE_IMPEDANCE:
+        elif control_mode == ControlMode.CARTESIAN_SIMPLE_VI:
             # Not supported for this task
             raise ValueError(
                 "Simple variable impedance mode not supported for this task"

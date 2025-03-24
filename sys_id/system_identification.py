@@ -28,9 +28,7 @@ class FrankaMujocoSimulator:
                         FrankaReach model.
         """
         # Create a FrankaReach task to get the model
-        self.task = FrankaReach(
-            control_mode=ControlMode.CARTESIAN_SIMPLE_VARIABLE_IMPEDANCE
-        )
+        self.task = FrankaReach(control_mode=ControlMode.CARTESIAN_SIMPLE_VI)
         self.mj_model = self.task.mj_model
 
         # Keep a copy of the original model parameters that we will modify

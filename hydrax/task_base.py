@@ -14,13 +14,13 @@ class ControlMode(Enum):
     # Controls are based on mujoco model
     GENERAL = auto()
     # Controls are based on mujoco model, with variable individual kp and kv gains
-    GENERAL_VARIABLE_IMPEDANCE = auto()
+    GENERAL_VI = auto()
     # Cartesian impedance control, assumes model has torque actuators and single end-effector
     CARTESIAN = auto()
     # Cartesian impedance control, with variable individual kp and kv gains, assumes model has torque actuators and single end-effector
-    CARTESIAN_VARIABLE_IMPEDANCE = auto()
+    CARTESIAN_VI = auto()
     # Cartesian impedance control, with variable trans/rot kp gains, and d_gains as 2*sqrt(p_gain), assumes model has torque actuators and single end-effector
-    CARTESIAN_SIMPLE_VARIABLE_IMPEDANCE = auto()
+    CARTESIAN_SIMPLE_VI = auto()
 
 
 class Task(ABC):
@@ -107,7 +107,7 @@ class Task(ABC):
             self.nu_total = 6
             self.u_min = jnp.array([-1, -1, -1, -3.14, -3.14, -3.14])
             self.u_max = jnp.array([1, 1, 1, 3.14, 3.14, 3.14])
-        elif self.control_mode == ControlMode.GENERAL_VARIABLE_IMPEDANCE:
+        elif self.control_mode == ControlMode.GENERAL_VI:
             self.nu_ctrl = mj_model.nu
             self.nu_total = mj_model.nu * 3  # Control + p_gains + d_gains
 
@@ -133,7 +133,7 @@ class Task(ABC):
             self.u_min = jnp.concatenate([ctrl_min, self.p_gain_min, self.d_gain_min])
             self.u_max = jnp.concatenate([ctrl_max, self.p_gain_max, self.d_gain_max])
 
-        elif self.control_mode == ControlMode.CARTESIAN_VARIABLE_IMPEDANCE:
+        elif self.control_mode == ControlMode.CARTESIAN_VI:
             self.nu_ctrl = 6
             self.nu_total = 6 * 3  # 6 cartesian + 6 p_gains + 6 d_gains
 
@@ -159,7 +159,7 @@ class Task(ABC):
                 ]
             )
 
-        elif self.control_mode == ControlMode.CARTESIAN_SIMPLE_VARIABLE_IMPEDANCE:
+        elif self.control_mode == ControlMode.CARTESIAN_SIMPLE_VI:
             self.nu_ctrl = 6
             self.nu_total = 6 + 2  # 6 cartesian + trans_p_gain + rot_p_gain
 
@@ -287,17 +287,17 @@ class Task(ABC):
             or self.control_mode == ControlMode.CARTESIAN
         ):
             return control, None, None
-        elif self.control_mode == ControlMode.GENERAL_VARIABLE_IMPEDANCE:
+        elif self.control_mode == ControlMode.GENERAL_VI:
             u = control[: self.nu_ctrl]
             p_gains = control[self.nu_ctrl : 2 * self.nu_ctrl]
             d_gains = control[2 * self.nu_ctrl : 3 * self.nu_ctrl]
             return u, p_gains, d_gains
-        elif self.control_mode == ControlMode.CARTESIAN_VARIABLE_IMPEDANCE:
+        elif self.control_mode == ControlMode.CARTESIAN_VI:
             u = control[: self.nu_ctrl]
             p_gains = control[self.nu_ctrl : 2 * self.nu_ctrl]
             d_gains = control[2 * self.nu_ctrl : 3 * self.nu_ctrl]
             return u, p_gains, d_gains
-        elif self.control_mode == ControlMode.CARTESIAN_SIMPLE_VARIABLE_IMPEDANCE:
+        elif self.control_mode == ControlMode.CARTESIAN_SIMPLE_VI:
             u = control[: self.nu_ctrl]
             # Extract the two scalar gains (translational and rotational)
             trans_p_gain = control[self.nu_ctrl]

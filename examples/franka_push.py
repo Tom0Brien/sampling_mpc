@@ -43,7 +43,7 @@ def main():
 
     elif args.algorithm == "mppi":
         print("Running MPPI")
-        if control_mode == ControlMode.GENERAL_VARIABLE_IMPEDANCE:
+        if control_mode == ControlMode.GENERAL_VI:
             # Individual gain optimization (6 controls + 12 gains)
             ctrl = MPPI(
                 task,
@@ -72,7 +72,7 @@ def main():
                 ),
                 temperature=0.001,
             )
-        elif control_mode == ControlMode.CARTESIAN_SIMPLE_VARIABLE_IMPEDANCE:
+        elif control_mode == ControlMode.CARTESIAN_SIMPLE_VI:
             # Simple gain optimization (6 controls + 2 gains)
             ctrl = MPPI(
                 task,
@@ -188,7 +188,7 @@ def main():
             ),
             (task.planning_horizon, 1),
         )
-    elif control_mode == ControlMode.CARTESIAN_SIMPLE_VARIABLE_IMPEDANCE:
+    elif control_mode == ControlMode.CARTESIAN_SIMPLE_VI:
         initial_control = jnp.tile(
             jnp.array([0.5, 0.0, 0.4, -3.14, 0.0, 0.0, 300, 50]),
             (task.planning_horizon, 1),

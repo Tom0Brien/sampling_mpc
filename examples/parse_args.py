@@ -4,10 +4,10 @@ from hydrax.task_base import ControlMode
 
 control_mode_map = {
     "general": ControlMode.GENERAL,
+    "general_vi": ControlMode.GENERAL_VI,
     "cartesian": ControlMode.CARTESIAN,
-    "general_variable_impedance": ControlMode.GENERAL_VARIABLE_IMPEDANCE,
-    "cartesian_variable_impedance": ControlMode.CARTESIAN_VARIABLE_IMPEDANCE,
-    "cartesian_simple_variable_impedance": ControlMode.CARTESIAN_SIMPLE_VARIABLE_IMPEDANCE,
+    "cartesian_vi": ControlMode.CARTESIAN_VI,
+    "cartesian_simple_vi": ControlMode.CARTESIAN_SIMPLE_VI,
 }
 
 
@@ -21,13 +21,13 @@ def parse_args():
         type=str,
         choices=[
             "general",
+            "general_vi",
             "cartesian",
-            "general_variable_impedance",
-            "cartesian_variable_impedance",
-            "cartesian_simple_variable_impedance",
+            "cartesian_vi",
+            "cartesian_simple_vi",
         ],
-        default="none",
-        help="Control mode (none, general, cartesian, general_variable_impedance, cartesian_variable_impedance, cartesian_simple_variable_impedance)",
+        default="general",
+        help="Control mode (general, general_vi, cartesian, cartesian_vi, cartesian_simple_vi)",
     )
     subparsers = parser.add_subparsers(
         dest="algorithm", help="Sampling algorithm (choose one)"
