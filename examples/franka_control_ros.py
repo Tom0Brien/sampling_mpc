@@ -53,18 +53,6 @@ class FrankaRosControl:
             "dynamic_reconfigure/Reconfigure",
         )
 
-        # Initial stiffness/damping values (similar to C++ example defaults)
-        self.translational_stiffness = 50.0  # N/m
-        self.rotational_stiffness = 20.0  # Nm/rad
-        self.nullspace_stiffness = 1.0
-
-        # Send initial compliance parameters
-        self.update_compliance_params(
-            self.translational_stiffness,
-            self.rotational_stiffness,
-            self.nullspace_stiffness,
-        )
-
         # Wait for publishers to be ready
         time.sleep(1.0)
 
@@ -105,7 +93,7 @@ class FrankaRosControl:
                     noise_level=0.01,
                     temperature=0.001,
                 )
-            if control_mode_enum == ControlMode.CARTESIAN_SIMPLE_VI:
+            elif control_mode_enum == ControlMode.CARTESIAN_SIMPLE_VI:
                 self.controller = MPPI(
                     self.task,
                     num_samples=2000,
@@ -114,6 +102,8 @@ class FrankaRosControl:
                     ),  # 6 pose + 2 gain params
                     temperature=0.001,
                 )
+            else:
+                raise ValueError(f"Unsupported controller mode: {control_mode_enum}")
         else:
             raise ValueError(f"Unsupported controller type: {controller_type}")
 
@@ -121,8 +111,56 @@ class FrankaRosControl:
         self.jit_optimize = jax.jit(self.controller.optimize, donate_argnums=(1,))
         self.get_action = jax.jit(self.controller.get_action)
 
-        # Initialize policy parameters
-        self.policy_params = self.controller.init_params()
+        # Initial conditions
+        initial_control = None
+        self.translational_stiffness = 50.0  # N/m
+        self.rotational_stiffness = 30.0  # Nm/rad
+        self.nullspace_stiffness = 1.0
+        if (
+            control_mode_enum == ControlMode.CARTESIAN
+            or control_mode_enum == ControlMode.GENERAL
+        ):
+            initial_control = jnp.tile(
+                jnp.array(
+                    [
+                        0.5,  # x reference
+                        0.0,  # y reference
+                        0.4,  # z reference
+                        -3.14,  # roll reference
+                        0.0,  # pitch reference
+                        0.0,  # yaw reference
+                    ]
+                ),
+                (self.task.planning_horizon, 1),
+            )
+        elif control_mode_enum == ControlMode.CARTESIAN_SIMPLE_VI:
+            initial_control = jnp.tile(
+                jnp.array(
+                    [
+                        0.5,
+                        0.0,
+                        0.4,
+                        -3.14,
+                        0.0,
+                        0.0,
+                        self.translational_stiffness,
+                        self.rotational_stiffness,
+                    ]
+                ),
+                (self.task.planning_horizon, 1),
+            )
+
+        # Send initial compliance parameters
+        self.update_compliance_params(
+            self.translational_stiffness,
+            self.rotational_stiffness,
+            self.nullspace_stiffness,
+        )
+
+        # Initialize policy parameters and initial control sequence
+        self.policy_params = self.controller.init_params(
+            initial_control=initial_control
+        )
 
         # Set up joint state callback
         self.joint_state_sub.subscribe(self.joint_state_callback)
