@@ -15,17 +15,12 @@ class RosDataCollector:
         self.client.run()
         print(f"Connected to ROS: {self.client.is_connected}")
 
-        # Set up subscribers for robot state
-        self.joint_state_sub = roslibpy.Topic(
-            self.client, "/joint_states", "sensor_msgs/JointState"
-        )
+        # Set up subscribers for desired equilibrium pose and measured Franka state
         self.cartesian_pose_sub = roslibpy.Topic(
             self.client,
             "/cartesian_impedance_example_controller/equilibrium_pose",
             "geometry_msgs/PoseStamped",
         )
-
-        # Add subscriber for measured end-effector pose from Franka state
         self.franka_state_sub = roslibpy.Topic(
             self.client,
             "/franka_state_controller/franka_states",
@@ -35,13 +30,14 @@ class RosDataCollector:
         # Data storage
         self.joint_positions = []
         self.joint_velocities = []
+        self.latest_commanded_ee_pose = np.array([0.5, 0.0, 0.5, -1.0, 0.0, 0.0, 0.0])
         self.commanded_ee_poses = []  # Renamed from cartesian_poses for clarity
         self.measured_ee_poses = []  # New array for measured end-effector poses
+        self.joint_efforts = []  # New array for joint efforts (torques)
         self.timestamps = []
         self.controller_params = {}
 
         # Subscribe to topics
-        self.joint_state_sub.subscribe(self.joint_state_callback)
         self.cartesian_pose_sub.subscribe(self.cartesian_pose_callback)
         self.franka_state_sub.subscribe(self.franka_state_callback)
 
@@ -113,15 +109,6 @@ class RosDataCollector:
         else:
             print("Failed to update compliance parameters:", result)
 
-    def joint_state_callback(self, message):
-        self.joint_positions.append(np.array(message["position"]))
-        self.joint_velocities.append(np.array(message["velocity"]))
-        if "header" in message:
-            self.timestamps.append(
-                message["header"]["stamp"]["secs"]
-                + message["header"]["stamp"]["nsecs"] * 1e-9
-            )
-
     def cartesian_pose_callback(self, message):
         """Callback for the commanded equilibrium pose"""
         pose = message["pose"]
@@ -132,7 +119,7 @@ class RosDataCollector:
             pose["orientation"]["z"],
             pose["orientation"]["w"],
         ]
-        self.commanded_ee_poses.append(np.concatenate([position, orientation]))
+        self.latest_commanded_ee_pose = np.concatenate([position, orientation])
 
     def franka_state_callback(self, message):
         """Callback for the measured end-effector state from Franka"""
@@ -154,6 +141,29 @@ class RosDataCollector:
             self.measured_ee_poses.append(ee_pose)
         else:
             print("Warning: No 'O_T_EE' field in franka_states message")
+
+        if "tau_J_d" in message:
+            self.joint_efforts.append(np.array(message["tau_J_d"]))
+        else:
+            print("Warning: No 'tau_J_d' field in franka_states message")
+
+        if "q" in message:
+            self.joint_positions.append(np.array(message["q"]))
+        else:
+            print("Warning: No 'q' field in joint_states message")
+
+        if "dq" in message:
+            self.joint_velocities.append(np.array(message["dq"]))
+        else:
+            print("Warning: No 'dq' field in joint_states message")
+
+        if "header" in message:
+            self.timestamps.append(
+                message["header"]["stamp"]["secs"]
+                + message["header"]["stamp"]["nsecs"] * 1e-9
+            )
+
+        self.commanded_ee_poses.append(self.latest_commanded_ee_pose)
 
     def send_cartesian_command(self, position, orientation):
         """
@@ -203,11 +213,15 @@ class RosDataCollector:
         measured_ee_poses = (
             np.array(self.measured_ee_poses) if self.measured_ee_poses else None
         )
+        joint_efforts = np.array(self.joint_efforts) if self.joint_efforts else None
 
         print(f"Collected {len(joint_positions)} joint state data points")
         print(f"Collected {len(commanded_ee_poses)} commanded poses")
         print(
             f"Collected {len(measured_ee_poses) if measured_ee_poses is not None else 0} measured end-effector poses"
+        )
+        print(
+            f"Collected {len(joint_efforts) if joint_efforts is not None else 0} joint effort measurements"
         )
 
         return {
@@ -215,13 +229,13 @@ class RosDataCollector:
             "joint_velocities": joint_velocities,
             "commanded_ee_poses": commanded_ee_poses,
             "measured_ee_poses": measured_ee_poses,
+            "joint_efforts": joint_efforts,  # Added joint efforts to returned data
             "timestamps": np.array(self.timestamps) if self.timestamps else None,
             "controller_params": self.controller_params,
         }
 
     def cleanup(self):
         self.cartesian_pose_pub.unadvertise()
-        self.joint_state_sub.unsubscribe()
         self.cartesian_pose_sub.unsubscribe()
         self.franka_state_sub.unsubscribe()
         self.client.terminate()
@@ -345,13 +359,13 @@ def main():
     parser.add_argument(
         "--trans-stiffness",
         type=float,
-        default=300.0,
+        default=200.0,
         help="Translational stiffness for the cartesian impedance controller",
     )
     parser.add_argument(
         "--rot-stiffness",
         type=float,
-        default=50.0,
+        default=10.0,
         help="Rotational stiffness for the cartesian impedance controller",
     )
     parser.add_argument(
@@ -379,19 +393,14 @@ def main():
     print("Waiting for compliance parameters to take effect...")
     time.sleep(1.0)
 
-    # Check if we have received any commanded ee poses
-    if len(collector.commanded_ee_poses) == 0:
-        print("WARNING: No commanded poses received. Using default pose.")
-        base_pose = np.array([0.5, 0.0, 0.5, -1.0, 0.0, 0.0, 0.0])  # Default pose
-    else:
-        base_pose = collector.commanded_ee_poses[-1]
-        print(f"Using current robot pose as base: {base_pose}")
+    base_pose = np.array([0.5, 0.0, 0.5, -1.0, 0.0, 0.0, 0.0])
 
     # Clear any cached data before we start the experiment
     collector.joint_positions = []
     collector.joint_velocities = []
     collector.commanded_ee_poses = []
     collector.measured_ee_poses = []
+    collector.joint_efforts = []
     collector.timestamps = []
     # Generate sinusoidal trajectory
     print(
@@ -452,6 +461,9 @@ def main():
     print(f"  Recorded commanded poses: {len(data['commanded_ee_poses'])}")
     print(
         f"  Recorded measured poses: {len(data['measured_ee_poses']) if data['measured_ee_poses'] is not None else 0}"
+    )
+    print(
+        f"  Recorded joint efforts: {len(data['joint_efforts']) if data['joint_efforts'] is not None else 0}"
     )
 
     # Clean up

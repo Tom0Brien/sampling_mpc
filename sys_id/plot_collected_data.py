@@ -39,6 +39,14 @@ def plot_trajectory_data(data, output_dir="plots"):
     else:
         print(f"No measured end-effector poses found in data")
 
+    # Check if we have joint effort (torque) data
+    has_joint_efforts = "joint_efforts" in data and data["joint_efforts"] is not None
+    if has_joint_efforts:
+        joint_efforts = data["joint_efforts"]
+        print(f"Found joint effort (torque) data in data")
+    else:
+        print(f"No joint effort (torque) data found in data")
+
     # Print data shapes for debugging
     print(f"Data shapes:")
     print(f"  Joint positions: {joint_positions.shape}")
@@ -47,6 +55,8 @@ def plot_trajectory_data(data, output_dir="plots"):
         print(f"  Commanded end-effector poses: {commanded_ee_poses.shape}")
     if has_measured_poses:
         print(f"  Measured end-effector poses: {measured_ee_poses.shape}")
+    if has_joint_efforts:
+        print(f"  Joint efforts (torques): {joint_efforts.shape}")
     if timestamps is not None:
         print(f"  Timestamps: {timestamps.shape}")
 
@@ -59,6 +69,9 @@ def plot_trajectory_data(data, output_dir="plots"):
 
     if has_measured_poses:
         measured_pose_indices = np.arange(len(measured_ee_poses))
+
+    if has_joint_efforts:
+        effort_indices = np.arange(len(joint_efforts))
 
     if timestamps is not None:
         # If timestamps available, interpolate to get consistent time values
@@ -82,6 +95,12 @@ def plot_trajectory_data(data, output_dir="plots"):
             else:
                 measured_pose_times = np.linspace(0, 1, len(measured_ee_poses))
 
+        if has_joint_efforts:
+            if len(timestamps) == len(joint_efforts):
+                effort_times = timestamps - timestamps[0]
+            else:
+                effort_times = np.linspace(0, 1, len(joint_efforts))
+
         time_label = "Time (s)"
     else:
         # Use indices if no timestamps
@@ -90,6 +109,8 @@ def plot_trajectory_data(data, output_dir="plots"):
             cmd_pose_times = cmd_pose_indices
         if has_measured_poses:
             measured_pose_times = measured_pose_indices
+        if has_joint_efforts:
+            effort_times = effort_indices
         time_label = "Step"
 
     # Create figure for cartesian position plots
@@ -402,6 +423,24 @@ def plot_trajectory_data(data, output_dir="plots"):
             print(f"Error creating tracking error plots: {e}")
     elif has_measured_poses and commanded_ee_poses is None:
         print("Only measured poses available - skipping tracking error plots")
+
+    # Create figure for joint efforts (torques) if available
+    if has_joint_efforts:
+        n_joints = min(7, joint_efforts.shape[1])
+        fig, axes = plt.subplots(n_joints, 1, figsize=(12, 15), sharex=True)
+        if n_joints == 1:
+            axes = [axes]  # Make axes always iterable
+        fig.suptitle("Joint Effort (Torque) Trajectories", fontsize=16)
+
+        # Plot joint efforts
+        for i in range(n_joints):
+            axes[i].plot(effort_times, joint_efforts[:, i])
+            axes[i].set_ylabel(f"Joint {i + 1} Torque (Nm)")
+            axes[i].grid(True)
+
+        axes[-1].set_xlabel(time_label)
+        plt.tight_layout(rect=[0, 0, 1, 0.95])  # Adjust for title
+        plt.savefig(os.path.join(output_dir, "joint_efforts.png"))
 
     print(f"Plots saved to directory: {output_dir}")
 
