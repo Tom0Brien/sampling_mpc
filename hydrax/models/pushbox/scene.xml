@@ -1,4 +1,4 @@
-<mujoco model="particle_scene">
+<mujoco model="pushbox_scene">
   <!-- Model that includes like lighting and a ground. -->
   <include file="pushbox.xml"/>
 
@@ -19,7 +19,7 @@
 
   <worldbody>
     <light pos="0 0 1"/>
-    <geom name="floor" size="0 0 .125" type="plane" material="groundplane"/>
+    <geom name="floor" size="0 0 .125" type="plane" material="groundplane" contype="1"/>
   </worldbody>
 
 </mujoco>

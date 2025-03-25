@@ -1,50 +1,50 @@
 <mujoco model="pushbox">
-  <option timestep="0.001" iterations="1" ls_iterations="4" />
+
+  <option timestep="0.005" iterations="5" ls_iterations="8" integrator="implicitfast">
+    <flag eulerdamp="disable"/>
+  </option>
+  <custom>
+    <numeric data="5" name="max_contact_points"/>
+    <numeric data="5" name="max_geom_pairs"/>
+  </custom>
 
   <default>
     <default class="goal">
       <geom conaffinity="0" contype="0" rgba="0 1 0 0.2"/>
     </default>
     <default class="translation">
-      <position kp="100" kv="20" ctrlrange="-0.25 0.25"/>
+      <position kp="20" kv="5" ctrlrange="-0.75 0.75"/>
     </default>
     <geom friction="1"/>
   </default>
 
   <worldbody>
     <!-- Reference site for Cartesian control -->
-    <site name="reference" pos="0.0 0.0 0.02" size="0.01" rgba="1 0 0 0.0"/>
+    <site name="reference" pos="0.0 0.0 0.04" size="0.01" rgba="1 0 0 0.0"/>
     
-    <body name="goal" mocap="true" pos="0.0 0.1 0.02">
-      <geom class="goal" name="goal_cube" type="box" size="0.02 0.02 0.02"/>
+    <!-- Replace static goal with mocap body -->
+    <body name="goal" mocap="true" pos="0.0 0.1 0.04">
+      <geom class="goal" name="goal_cube" type="box" size="0.06 0.06 0.04"/>
     </body>
 
-    <body name="block" pos="0.0 0.0 0.02">
-      <joint name="T_x" type="slide" pos="0 0 0" axis="1 0 0" />
-      <joint name="T_y" type="slide" pos="0 0 0" axis="0 1 0" />
-      <joint name="T_z" type="slide" pos="0 0 0" axis="0 0 1" />
-      <joint name="R_z" axis="0 0 1" />
-      <geom name="block_cube" type="box" size="0.02 0.02 0.02" />
-      <inertial pos="0 0 0" mass="1" diaginertia="0.001 0.001 0.001"/>
+    <body name="box" pos="0.0 0.0 0.04">
+      <joint type="free"/>
+      <geom name="box_geom" type="box" size="0.06 0.06 0.04" rgba="0.8 0.2 0.2 1"
+            condim="3" friction="0.6" contype="2" conaffinity="1" solref="0.02 1" priority="1"/>
+      <site name="box_site" pos="0 0 0" size="0.005"/>
+      <inertial pos="0 0 0" mass="0.15" diaginertia="0.001 0.001 0.001"/>
     </body>
 
-    <body name="pusher" pos="0 0.0 0.02">
+    <body name="pusher" pos="0 0.0 0.041">
       <joint name="root_x" type="slide" pos="0 0 0" axis="1 0 0" />
       <joint name="root_y" type="slide" pos="0 0 0" axis="0 1 0" />
-      <geom name="pusher" type="sphere" size="0.02" rgba="1 0 0 1" />
-      <site name="pusher" pos="0 0 0" size="0.02" rgba="1 0 0 0" />
-      <inertial pos="0 0 0" mass="0.1" diaginertia="0.0001 0.0001 0.0001"/>
+      <geom name="pusher" type="sphere" size="0.04" rgba="1 0 0 1" contype="1" conaffinity="1"/>
+      <site name="pusher" pos="0 0 0" size="0.04" rgba="1 0 0 0" />
     </body>
   </worldbody>
 
   <actuator>
-    <!-- Replace velocity actuators with position actuators -->
     <position name="x" site="pusher" refsite="reference" gear="1 0 0 0 0 0" class="translation"/>
     <position name="y" site="pusher" refsite="reference" gear="0 1 0 0 0 0" class="translation"/>
   </actuator>
-
-  <sensor>
-    <framepos name="position" objtype="body" objname="block" reftype="body" refname="goal"/>
-    <framequat name="orientation" objtype="body" objname="block" reftype="body" refname="goal"/>
-  </sensor>
 </mujoco>

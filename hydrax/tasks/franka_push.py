@@ -65,8 +65,6 @@ class FrankaPush(Task):
         self.ee_site_id = mj_model.site("gripper").id
         self.reference_id = mj_model.site("reference").id
         self.box_id = mj_model.body("box").id
-        self.box_site_id = mj_model.site("box_site").id
-        self.reference_id = mj_model.site("reference").id
 
         self.q_d_nullspace = jnp.array(
             [-0.196, -0.189, 0.182, -2.1, 0.0378, 1.91, 0.756, 0, 0]

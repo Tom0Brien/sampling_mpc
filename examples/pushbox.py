@@ -45,7 +45,7 @@ def main():
             ctrl = MPPI(
                 task,
                 num_samples=1000,
-                noise_level=0.2,
+                noise_level=0.05,
                 temperature=0.001,
             )
         elif control_mode == ControlMode.GENERAL_VI:
@@ -104,11 +104,8 @@ def main():
 
     # Define the model used for simulation
     mj_model = task.mj_model
-    mj_model.opt.timestep = 0.001
-    mj_model.opt.iterations = 100
-    mj_model.opt.ls_iterations = 50
     mj_data = mujoco.MjData(mj_model)
-    mj_data.qpos = [0.15, 0.0, 0.0, 0, 0.2, 0.0]
+    mj_data.qpos = [0.0, -0.2, 0.04, 1.0, 0, 0, 0, 0.0, -0.3]
 
     # Run the interactive simulation
     run_interactive(
