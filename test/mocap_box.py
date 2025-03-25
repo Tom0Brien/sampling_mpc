@@ -6,6 +6,7 @@ from QTM
 import asyncio
 import xml.etree.ElementTree as ET
 import qtm_rt
+import numpy as np
 
 
 def create_body_index(xml_string):
@@ -25,9 +26,18 @@ def on_packet(packet, body_index):
     if "box" in body_index:
         box_index = body_index["box"]
         position, rotation = bodies[box_index]
+
+        # Convert position to numpy array
+        position_array = np.array([position.x, position.y, position.z])
+        # Convert to meters
+        position_array = position_array / 1000
+
+        # Convert rotation matrix (9 values) to 3x3 numpy array
+        rotation_array = np.array(rotation.matrix).reshape(3, 3)
+
         print(f"Frame: {packet.framenumber}")
-        print(f"Position: {position}")
-        print(f"Rotation: {rotation}")
+        print(f"Position: {position_array}")
+        print(f"Rotation Matrix:\n{rotation_array}")
         print("-" * 50)
 
 

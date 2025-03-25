@@ -1997,6 +1997,15 @@ wheels = [
 ]
 
 [[package]]
+name = "qtm-rt"
+version = "3.0.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a9/f3/d0679a3e9afe2d0875655ca822cf83a9f73a3ed68598f2e838f6945c3913/qtm_rt-3.0.2.tar.gz", hash = "sha256:c65cdf7abc6c3de1eb87bed24b1d335aea9b859581572414d8d02c49dce051f2", size = 3104028 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/34/52/a963a98d06bccba6bc66b6098f5c3dab1080029a3a3a9e2396079a042f4e/qtm_rt-3.0.2-py3-none-any.whl", hash = "sha256:d512dd8ff7629e3c5cfa07b77ed1f6376bd4ce5d6d7b0e2e674e2f041a17f479", size = 3109052 },
+]
+
+[[package]]
 name = "requests"
 version = "2.32.3"
 source = { registry = "https://pypi.org/simple" }
@@ -2076,6 +2085,7 @@ dependencies = [
     { name = "mujoco-mjx" },
     { name = "optuna" },
     { name = "plotly" },
+    { name = "qtm-rt" },
     { name = "roslibpy" },
     { name = "scikit-learn" },
     { name = "tensorboard" },
@@ -2098,6 +2108,7 @@ requires-dist = [
     { name = "mujoco-mjx", specifier = ">=3.3.0" },
     { name = "optuna", specifier = ">=4.2.1" },
     { name = "plotly", specifier = ">=6.0.1" },
+    { name = "qtm-rt", specifier = ">=3.0.2" },
     { name = "roslibpy", specifier = ">=1.8.1" },
     { name = "scikit-learn", specifier = ">=1.6.1" },
     { name = "tensorboard", specifier = ">=2.19.0" },
