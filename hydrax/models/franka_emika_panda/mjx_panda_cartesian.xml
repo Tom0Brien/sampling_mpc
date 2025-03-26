@@ -241,7 +241,7 @@
                       <!-- <geom name="hand_capsule" type="capsule"
                        class="collision" conaffinity="1" size="0.04 0.06"
                        quat="1 1 0 0" pos="0 0 0.03"/> -->
-                      <site name="gripper" pos="0 0 0.1"/>
+                      <site name="gripper" pos="0 0 0.1034"/>
                        <!-- Sphere collision -->
                        <geom name="gripper_sphere" type="sphere" size="0.02" pos="0 0 0.1" conaffinity="3" />
                       <body name="left_finger" pos="0 0 0.0584" gravcomp="1">
