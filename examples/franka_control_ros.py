@@ -74,7 +74,7 @@ class FrankaRosControl:
         self.mj_data.qpos[:7] = [-0.196, -0.189, 0.182, -2.1, 0.0378, 1.91, 0.756]
 
         # Initial desired pose as a single 7D vector: [x, y, z, qx, qy, qz, qw]
-        self.desired_pose = np.array([0.5, 0.0, 0.5, 0.0, 0.0, 0.0, 1.0])
+        self.desired_pose = np.array([0.4, 0.0, 0.4, 0.0, -1.0, 0.0, 0.0])
 
         # Set up the controller based on type
         if controller_type == "ps":
@@ -93,7 +93,7 @@ class FrankaRosControl:
                 self.controller = MPPI(
                     self.task,
                     num_samples=2000,
-                    noise_level=0.01,
+                    noise_level=0.001,
                     temperature=0.001,
                 )
             elif control_mode_enum == ControlMode.CARTESIAN_SIMPLE_VI:
@@ -287,21 +287,192 @@ class FrankaRosControl:
         # Publish the pose message
         self.cartesian_pose_pub.publish(roslibpy.Message(pose_msg))
 
-    def run_control_loop(
-        self, frequency=10, duration=None, enable_viewer=False, fixed_camera_id=None
+    def _init_viewer_traces(self, viewer, max_traces):
+        """Initialize trace geometries for rollout visualization"""
+        if not hasattr(self.controller.task, "trace_site_ids"):
+            return
+
+        num_trace_sites = len(self.controller.task.trace_site_ids)
+        num_traces = min(self.controller.task.planning_horizon, max_traces)
+        trace_color = [1.0, 1.0, 1.0, 0.1]
+
+        for i in range(
+            num_trace_sites * num_traces * self.controller.task.planning_horizon
+        ):
+            mujoco.mjv_initGeom(
+                viewer.user_scn.geoms[i],
+                type=mujoco.mjtGeom.mjGEOM_LINE,
+                size=np.zeros(3),
+                pos=np.zeros(3),
+                mat=np.eye(3).flatten(),
+                rgba=np.array(trace_color),
+            )
+            viewer.user_scn.ngeom += 1
+
+    def _visualize_rollouts(self, viewer, rollouts, max_traces, trace_width):
+        """Visualize controller rollouts"""
+        if not hasattr(self.controller.task, "trace_site_ids"):
+            return
+
+        num_trace_sites = len(self.controller.task.trace_site_ids)
+        num_traces = min(rollouts.controls.shape[1], max_traces)
+
+        ii = 0
+        for k in range(num_trace_sites):
+            for i in range(num_traces):
+                for j in range(self.controller.task.planning_horizon):
+                    mujoco.mjv_connector(
+                        viewer.user_scn.geoms[ii],
+                        mujoco.mjtGeom.mjGEOM_LINE,
+                        trace_width,
+                        rollouts.trace_sites[i, j, k],
+                        rollouts.trace_sites[i, j + 1, k],
+                    )
+                    ii += 1
+                    viewer.user_scn.ngeom += 1
+
+    def _add_cost_text(self, viewer, total_cost):
+        """Add cost text to viewer"""
+        cost_pos = np.array([0.0, 0.0, 0.5])
+        geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
+        mujoco.mjv_initGeom(
+            geom,
+            type=mujoco.mjtGeom.mjGEOM_LABEL,
+            size=np.array([0.2, 0.2, 0.2]),
+            pos=cost_pos,
+            mat=np.eye(3).flatten(),
+            rgba=np.array([1, 1, 1, 1]),
+        )
+        geom.label = f"Cost: {total_cost:.4f}"
+        viewer.user_scn.ngeom += 1
+
+    def _visualize_desired_pose(self, viewer):
+        """Visualize the desired pose with a sphere and label"""
+        if not hasattr(self, "desired_pose"):
+            return
+
+        # Add sphere for desired pose
+        geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
+        mujoco.mjv_initGeom(
+            geom,
+            type=mujoco.mjtGeom.mjGEOM_SPHERE,
+            size=[0.02, 0, 0],
+            pos=self.desired_pose[:3],
+            mat=np.eye(3).flatten(),
+            rgba=[1.0, 0.0, 0.0, 0.8],
+        )
+        viewer.user_scn.ngeom += 1
+
+        # Add label for desired pose
+        geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
+        mujoco.mjv_initGeom(
+            geom,
+            type=mujoco.mjtGeom.mjGEOM_LABEL,
+            size=np.array([0.15, 0.15, 0.15]),
+            pos=self.desired_pose[:3] + np.array([0.0, 0.0, 0.05]),
+            mat=np.eye(3).flatten(),
+            rgba=np.array([1, 1, 1, 1]),
+        )
+        geom.label = "Target"
+        viewer.user_scn.ngeom += 1
+
+    def _plot_histories(
+        self, cost_history, p_gain_history, d_gain_history, control_history
     ):
+        """Plot and save control histories
+
+        Args:
+            cost_history (list): History of cost values
+            p_gain_history (list): History of P gains (optional)
+            d_gain_history (list): History of D gains (optional)
+            control_history (list): History of control signals
+        """
+        if not cost_history or len(cost_history) <= 1:
+            return
+
+        try:
+            # Determine number of subplots needed
+            num_subplots = 1  # Always have cost plot
+            if self.task.control_mode == ControlMode.CARTESIAN_SIMPLE_VI:
+                num_subplots += 2  # Add P and D gain plots
+            num_subplots += 1  # Add control signals plot
+
+            # Create figure
+            fig, axes = plt.subplots(num_subplots, 1, figsize=(10, 10), sharex=True)
+            axes = [axes] if not isinstance(axes, np.ndarray) else axes
+
+            # Plot cost history
+            axes[0].plot(cost_history)
+            axes[0].set_title("Total Cost Over Time")
+            axes[0].set_ylabel("Cost")
+            axes[0].grid(True)
+
+            current_plot = 1
+
+            # Plot gain histories if using CARTESIAN_SIMPLE_VI mode
+            if (
+                self.task.control_mode == ControlMode.CARTESIAN_SIMPLE_VI
+                and p_gain_history
+                and d_gain_history
+            ):
+                # Plot P gains
+                p_gains_array = np.array(p_gain_history)
+                for i in range(p_gains_array.shape[1]):
+                    axes[current_plot].plot(p_gains_array[:, i], label=f"Actuator {i}")
+                axes[current_plot].set_title("P Gains Over Time")
+                axes[current_plot].set_ylabel("P Gain")
+                axes[current_plot].grid(True)
+                axes[current_plot].legend()
+                current_plot += 1
+
+                # Plot D gains
+                d_gains_array = np.array(d_gain_history)
+                for i in range(d_gains_array.shape[1]):
+                    axes[current_plot].plot(d_gains_array[:, i], label=f"Actuator {i}")
+                axes[current_plot].set_title("D Gains Over Time")
+                axes[current_plot].set_ylabel("D Gain")
+                axes[current_plot].grid(True)
+                axes[current_plot].legend()
+                current_plot += 1
+
+            # Plot control signals
+            if control_history:
+                control_array = np.array(control_history)
+                for i in range(control_array.shape[1]):
+                    axes[current_plot].plot(control_array[:, i], label=f"Control {i}")
+                axes[current_plot].set_title("Control Signals Over Time")
+                axes[current_plot].set_ylabel("Control Value")
+                axes[current_plot].set_xlabel("Control Steps")
+                axes[current_plot].grid(True)
+                axes[current_plot].legend()
+
+            plt.tight_layout()
+            plt.savefig("recordings/ros_control_history.png")
+            plt.show()
+            print(
+                "Control histories plotted and saved to 'recordings/ros_control_history.png'"
+            )
+
+        except ImportError:
+            print(
+                "Matplotlib not available for plotting. Install with 'pip install matplotlib'"
+            )
+        except Exception as e:
+            print(f"Error plotting results: {str(e)}")
+
+    def run_control_loop(self, frequency=10, duration=None, enable_viewer=False):
         """
         Run the control loop at the specified frequency
         frequency: control frequency in Hz
         duration: duration in seconds (None for infinite)
         enable_viewer: whether to enable the MuJoCo viewer for debugging
-        fixed_camera_id: camera ID to use for the fixed camera view
+        fixed_camera_id: camera ID for fixed camera view
         """
         period = 1.0 / frequency
         start_time = time.time()
         iteration = 0
 
-        # For tracking costs and gains over time (added from deterministic.py)
+        # For tracking costs and gains over time
         cost_history = []
         p_gain_history = []
         d_gain_history = []
@@ -312,38 +483,49 @@ class FrankaRosControl:
         trace_width = 5.0
         trace_color = [1.0, 1.0, 1.0, 0.1]
 
+        # Keyboard control parameters
+        keyboard_step_size = 0.01
+        mocap_index = 0  # Index of mocap body to control
+
         print(f"Starting control loop at {frequency} Hz")
+
+        # Define keyboard callback
+        def key_callback(keycode):
+            key = keycode & 0xFF
+            if key == 7:  # LEFT
+                self.mj_data.mocap_pos[mocap_index, 0] -= keyboard_step_size
+                self.mjx_data = self.mjx_data.replace(
+                    mocap_pos=jnp.array(self.mj_data.mocap_pos)
+                )
+            elif key == 6:  # RIGHT
+                self.mj_data.mocap_pos[mocap_index, 0] += keyboard_step_size
+                self.mjx_data = self.mjx_data.replace(
+                    mocap_pos=jnp.array(self.mj_data.mocap_pos)
+                )
+            elif key == 9:  # UP
+                self.mj_data.mocap_pos[mocap_index, 1] += keyboard_step_size
+                self.mjx_data = self.mjx_data.replace(
+                    mocap_pos=jnp.array(self.mj_data.mocap_pos)
+                )
+            elif key == 8:  # DOWN
+                self.mj_data.mocap_pos[mocap_index, 1] -= keyboard_step_size
+                self.mjx_data = self.mjx_data.replace(
+                    mocap_pos=jnp.array(self.mj_data.mocap_pos)
+                )
 
         viewer = None
         try:
             # Initialize the MuJoCo viewer if requested
             if enable_viewer:
                 print("Starting MuJoCo viewer for debugging")
-                viewer = mujoco.viewer.launch_passive(self.mj_model, self.mj_data)
-                if fixed_camera_id is not None:
-                    # Set the custom camera
-                    viewer.cam.fixedcamid = fixed_camera_id
-                    viewer.cam.type = 2
+                viewer = mujoco.viewer.launch_passive(
+                    self.mj_model,
+                    self.mj_data,
+                    key_callback=key_callback,  # Add the keyboard callback
+                )
 
-                # Set up rollout traces
-                if hasattr(self.controller.task, "trace_site_ids"):
-                    num_trace_sites = len(self.controller.task.trace_site_ids)
-                    num_traces = min(self.controller.task.planning_horizon, max_traces)
-
-                    for i in range(
-                        num_trace_sites
-                        * num_traces
-                        * self.controller.task.planning_horizon
-                    ):
-                        mujoco.mjv_initGeom(
-                            viewer.user_scn.geoms[i],
-                            type=mujoco.mjtGeom.mjGEOM_LINE,
-                            size=np.zeros(3),
-                            pos=np.zeros(3),
-                            mat=np.eye(3).flatten(),
-                            rgba=np.array(trace_color),
-                        )
-                        viewer.user_scn.ngeom += 1
+                # Initialize trace geometries
+                self._init_viewer_traces(viewer, max_traces)
 
             while self.client.is_connected:
                 loop_start = time.time()
@@ -406,73 +588,12 @@ class FrankaRosControl:
                     # Clear previous geoms
                     viewer.user_scn.ngeom = 0
 
-                    # Visualize the rollouts
-                    if hasattr(self.controller.task, "trace_site_ids"):
-                        num_trace_sites = len(self.controller.task.trace_site_ids)
-                        num_traces = min(rollouts.controls.shape[1], max_traces)
-
-                        ii = 0
-                        for k in range(num_trace_sites):
-                            for i in range(num_traces):
-                                for j in range(self.controller.task.planning_horizon):
-                                    mujoco.mjv_connector(
-                                        viewer.user_scn.geoms[ii],
-                                        mujoco.mjtGeom.mjGEOM_LINE,
-                                        trace_width,
-                                        rollouts.trace_sites[i, j, k],
-                                        rollouts.trace_sites[i, j + 1, k],
-                                    )
-                                    ii += 1
-                                    viewer.user_scn.ngeom += 1
-
-                    # Position for cost text - above the scene
-                    cost_pos = np.array([0.0, 0.0, 0.5])
-
-                    # Add cost text
-                    geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
-                    mujoco.mjv_initGeom(
-                        geom,
-                        type=mujoco.mjtGeom.mjGEOM_LABEL,
-                        size=np.array([0.2, 0.2, 0.2]),
-                        pos=cost_pos,
-                        mat=np.eye(3).flatten(),
-                        rgba=np.array([1, 1, 1, 1]),  # white text
+                    # Update visualizations
+                    self._visualize_rollouts(
+                        viewer, rollouts, max_traces=5, trace_width=5.0
                     )
-                    geom.label = f"Cost: {total_cost:.4f}"
-                    viewer.user_scn.ngeom += 1
-
-                    # Add visualization of desired pose with a red sphere
-                    if hasattr(self, "desired_pose"):
-                        # The desired_pose is now a single 7D vector: [x, y, z, qx, qy, qz, qw]
-                        geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
-                        mujoco.mjv_initGeom(
-                            geom,
-                            type=mujoco.mjtGeom.mjGEOM_SPHERE,
-                            size=[0.02, 0, 0],  # Size of the sphere (radius)
-                            pos=self.desired_pose[:3],  # First 3 elements are position
-                            mat=np.eye(3).flatten(),
-                            rgba=[
-                                1.0,
-                                0.0,
-                                0.0,
-                                0.8,
-                            ],  # Red color with some transparency
-                        )
-                        viewer.user_scn.ngeom += 1
-
-                        # Add a text label for the desired pose
-                        geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
-                        mujoco.mjv_initGeom(
-                            geom,
-                            type=mujoco.mjtGeom.mjGEOM_LABEL,
-                            size=np.array([0.15, 0.15, 0.15]),
-                            pos=self.desired_pose[:3]
-                            + np.array([0.0, 0.0, 0.05]),  # Position above the sphere
-                            mat=np.eye(3).flatten(),
-                            rgba=np.array([1, 1, 1, 1]),  # White text
-                        )
-                        geom.label = "Target"
-                        viewer.user_scn.ngeom += 1
+                    self._add_cost_text(viewer, total_cost)
+                    self._visualize_desired_pose(viewer)
 
                     viewer.sync()
 
@@ -500,94 +621,13 @@ class FrankaRosControl:
             # Clean up ROS connections
             self.cartesian_pose_pub.unadvertise()
             self.joint_state_sub.unsubscribe()
-            self.rosout_sub.unsubscribe()
             self.client.terminate()
             print("\nROS connections closed")
 
-            # Plot cost and gain history
-            if cost_history and len(cost_history) > 1:
-                try:
-                    # Create figure with multiple subplots
-                    fig, axes = plt.subplots(
-                        1
-                        + (
-                            2
-                            if self.task.control_mode == ControlMode.CARTESIAN_SIMPLE_VI
-                            else 0
-                        )
-                        + 1,
-                        1,
-                        figsize=(10, 10),
-                        sharex=True,
-                    )
-
-                    # If not optimizing gains, axes is not a list, so make it one for consistency
-                    if self.task.control_mode != ControlMode.CARTESIAN_SIMPLE_VI:
-                        axes = [axes] if not isinstance(axes, np.ndarray) else axes
-
-                    # Plot cost history
-                    axes[0].plot(cost_history)
-                    axes[0].set_title("Total Cost Over Time")
-                    axes[0].set_ylabel("Cost")
-                    axes[0].grid(True)
-
-                    # Plot gain histories if optimizing gains
-                    if (
-                        self.task.control_mode == ControlMode.CARTESIAN_SIMPLE_VI
-                        and p_gain_history
-                        and d_gain_history
-                    ):
-                        # Convert lists of arrays to 2D arrays
-                        p_gains_array = np.array(p_gain_history)
-                        d_gains_array = np.array(d_gain_history)
-
-                        # Plot P gains
-                        for i in range(p_gains_array.shape[1]):
-                            axes[1].plot(p_gains_array[:, i], label=f"Actuator {i}")
-                        axes[1].set_title("P Gains Over Time")
-                        axes[1].set_ylabel("P Gain")
-                        axes[1].grid(True)
-                        axes[1].legend()
-
-                        # Plot D gains
-                        for i in range(d_gains_array.shape[1]):
-                            axes[2].plot(d_gains_array[:, i], label=f"Actuator {i}")
-                        axes[2].set_title("D Gains Over Time")
-                        axes[2].set_ylabel("D Gain")
-                        axes[2].grid(True)
-                        axes[2].legend()
-
-                        # Plot control signals (last subplot)
-                        control_plot_idx = 3
-                    else:
-                        # If not optimizing gains, control plot is the second subplot
-                        control_plot_idx = 1
-
-                    # Plot control history
-                    if control_history:
-                        control_array = np.array(control_history)
-                        for i in range(control_array.shape[1]):
-                            axes[control_plot_idx].plot(
-                                control_array[:, i], label=f"Control {i}"
-                            )
-                        axes[control_plot_idx].set_title("Control Signals Over Time")
-                        axes[control_plot_idx].set_ylabel("Control Value")
-                        axes[control_plot_idx].set_xlabel("Control Steps")
-                        axes[control_plot_idx].grid(True)
-                        axes[control_plot_idx].legend()
-
-                    plt.tight_layout()
-                    plt.savefig("recordings/ros_control_history.png")
-                    plt.show()
-                    print(
-                        "Cost, gain, and control history plotted and saved to 'recordings/ros_control_history.png'"
-                    )
-                except ImportError:
-                    print(
-                        "Matplotlib not available for plotting. Install with 'pip install matplotlib'"
-                    )
-                except Exception as e:
-                    print(f"Error plotting results: {str(e)}")
+            # Plot histories
+            self._plot_histories(
+                cost_history, p_gain_history, d_gain_history, control_history
+            )
 
 
 def main():
@@ -619,14 +659,8 @@ def main():
     parser.add_argument(
         "--enable-viewer",
         action="store_true",
-        default=True,
+        default=False,
         help="Enable MuJoCo viewer for debugging",
-    )
-    parser.add_argument(
-        "--fixed-camera-id",
-        type=int,
-        default=None,
-        help="Camera ID for fixed view in MuJoCo viewer",
     )
 
     args = parser.parse_args()
@@ -642,7 +676,6 @@ def main():
         frequency=args.frequency,
         duration=args.duration,
         enable_viewer=args.enable_viewer,
-        fixed_camera_id=args.fixed_camera_id,
     )
 
 
