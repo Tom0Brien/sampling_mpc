@@ -8,7 +8,8 @@
   </option>
 
   <custom>
-    <numeric data="1" name="max_contact_points"/>
+    <numeric data="0" name="max_contact_points"/>
+    <numeric data="0" name="max_geom_pairs"/>
   </custom>
 
   <visual>
