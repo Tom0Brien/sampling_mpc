@@ -46,7 +46,7 @@ class FrankaRosControl:
         )
         self.cartesian_pose_pub.advertise()
 
-        # Replace the publisher with a service client for dynamic reconfigure
+        # Setup dynamic reconfigure compliance service
         self.compliance_param_client = roslibpy.Service(
             self.client,
             "/cartesian_impedance_example_controller/dynamic_reconfigure_compliance_param_node/set_parameters",
@@ -82,11 +82,14 @@ class FrankaRosControl:
             self.controller = PredictiveSampling(
                 self.task,
                 num_samples=128,
-                noise_level=0.05,
+                noise_level=0.01,
             )
         elif controller_type == "mppi":
             print("Using MPPI controller")
-            if control_mode_enum == ControlMode.GENERAL:
+            if (
+                control_mode_enum == ControlMode.GENERAL
+                or control_mode_enum == ControlMode.CARTESIAN
+            ):
                 self.controller = MPPI(
                     self.task,
                     num_samples=2000,
@@ -113,8 +116,8 @@ class FrankaRosControl:
 
         # Initial conditions
         initial_control = None
-        self.translational_stiffness = 50.0  # N/m
-        self.rotational_stiffness = 30.0  # Nm/rad
+        self.translational_stiffness = 200.0  # N/m
+        self.rotational_stiffness = 10.0  # Nm/rad
         self.nullspace_stiffness = 1.0
         if (
             control_mode_enum == ControlMode.CARTESIAN
@@ -170,10 +173,6 @@ class FrankaRosControl:
         while self.current_joint_positions is None:
             time.sleep(0.1)
         print("Received initial joint state")
-
-        # Add logger subscription
-        self.rosout_sub = roslibpy.Topic(self.client, "/rosout", "rosgraph_msgs/Log")
-        self.rosout_sub.subscribe(self.rosout_callback)
 
     def joint_state_callback(self, message):
         """Callback for joint state messages"""
@@ -245,7 +244,8 @@ class FrankaRosControl:
         Send a cartesian pose command to the robot
         pose: [x, y, z, roll, pitch, yaw]
         """
-        # Transform the pose to the robot base frame (mujoco control is in reference frame)
+        # Transform the pose to the robot base frame
+        # MuJoCo controller is sometimes relative to a reference frame
         Rbr = self.mj_data.site_xmat[self.controller.task.reference_id].reshape(3, 3)
         rRBb = self.mj_data.site_xpos[self.controller.task.reference_id]
 
@@ -255,7 +255,6 @@ class FrankaRosControl:
         Rbg = Rbr @ Rrg.as_matrix()
         r = Rotation.from_matrix(Rbg)
         quat = r.as_quat()  # [x, y, z, w]
-        # Normalize the quaternion
         quat = quat / jnp.linalg.norm(quat)
 
         # Create pose message
@@ -287,13 +286,6 @@ class FrankaRosControl:
 
         # Publish the pose message
         self.cartesian_pose_pub.publish(roslibpy.Message(pose_msg))
-
-    def rosout_callback(self, message):
-        # Filter by log level if desired (1=DEBUG, 2=INFO, 4=WARN, 8=ERROR, 16=FATAL)
-        if message.get("level", 0) >= 4:  # WARN or higher
-            print(
-                f"ROS LOG [{message.get('name', 'unknown')}]: {message.get('msg', '')}"
-            )
 
     def run_control_loop(
         self, frequency=10, duration=None, enable_viewer=False, fixed_camera_id=None
@@ -388,13 +380,14 @@ class FrankaRosControl:
                 if self.task.control_mode == ControlMode.CARTESIAN_SIMPLE_VI:
                     # Extract control and gains
                     pose_command, p_gains, d_gains = self.task.extract_gains(action)
-                    print(f"Sending pose: {pose_command}")
-                    self.send_cartesian_command(pose_command)
 
                     # Update the compliance parameters
                     trans_p_gain = action[self.task.nu_ctrl]
                     rot_p_gain = action[self.task.nu_ctrl + 1]
                     self.update_compliance_params(trans_p_gain, rot_p_gain)
+
+                    # Send cartesian pose command
+                    self.send_cartesian_command(pose_command)
 
                     # Store history
                     control_history.append(np.array(pose_command))
@@ -403,7 +396,6 @@ class FrankaRosControl:
                 else:
                     # Action is directly the pose command
                     pose_command = action
-                    print(f"Sending pose: {pose_command}")
                     self.send_cartesian_command(pose_command)
 
                     # Store control history
@@ -448,45 +440,6 @@ class FrankaRosControl:
                     )
                     geom.label = f"Cost: {total_cost:.4f}"
                     viewer.user_scn.ngeom += 1
-
-                    # Add gain visualization if in variable impedance control mode
-                    if self.task.control_mode == ControlMode.CARTESIAN_SIMPLE_VI:
-                        # Format gain text
-                        trans_p_gain = action[self.task.nu_ctrl]
-                        rot_p_gain = action[self.task.nu_ctrl + 1]
-                        trans_d_gain = 2.0 * np.sqrt(trans_p_gain)
-                        rot_d_gain = 2.0 * np.sqrt(rot_p_gain)
-
-                        p_gain_text = f"Trans P-gain: {trans_p_gain:.2f}, Rot P-gain: {rot_p_gain:.2f}"
-                        d_gain_text = f"Trans D-gain: {trans_d_gain:.2f}, Rot D-gain: {rot_d_gain:.2f}"
-
-                        # Add P-gain text (positioned below cost text)
-                        geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
-                        mujoco.mjv_initGeom(
-                            geom,
-                            type=mujoco.mjtGeom.mjGEOM_LABEL,
-                            size=np.array([0.15, 0.15, 0.15]),
-                            pos=cost_pos
-                            - np.array([0.0, 0.0, 0.05]),  # position below cost
-                            mat=np.eye(3).flatten(),
-                            rgba=np.array([0.8, 0.8, 1.0, 1]),  # light blue text
-                        )
-                        geom.label = p_gain_text
-                        viewer.user_scn.ngeom += 1
-
-                        # Add D-gain text (positioned below P-gain text)
-                        geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
-                        mujoco.mjv_initGeom(
-                            geom,
-                            type=mujoco.mjtGeom.mjGEOM_LABEL,
-                            size=np.array([0.15, 0.15, 0.15]),
-                            pos=cost_pos
-                            - np.array([0.0, 0.0, 0.1]),  # position below P-gain
-                            mat=np.eye(3).flatten(),
-                            rgba=np.array([0.8, 1.0, 0.8, 1]),  # light green text
-                        )
-                        geom.label = d_gain_text
-                        viewer.user_scn.ngeom += 1
 
                     # Add visualization of desired pose with a red sphere
                     if hasattr(self, "desired_pose"):
@@ -659,7 +612,7 @@ def main():
     parser.add_argument(
         "--control-mode",
         type=str,
-        choices=["general", "cartesian_simple_vi"],
+        choices=["general", "cartesian", "cartesian_simple_vi"],
         default="general",
         help="Control mode (general for general control, CARTESIAN_SIMPLE_VI for cartesian impedance control with variable gains)",
     )
