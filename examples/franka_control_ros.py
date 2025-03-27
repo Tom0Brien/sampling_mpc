@@ -73,9 +73,6 @@ class FrankaRosControl:
         # Set the initial joint positions
         self.mj_data.qpos[:7] = [-0.196, -0.189, 0.182, -2.1, 0.0378, 1.91, 0.756]
 
-        # Initial desired pose as a single 7D vector: [x, y, z, qx, qy, qz, qw]
-        self.desired_pose = np.array([0.4, 0.0, 0.4, 0.0, -1.0, 0.0, 0.0])
-
         # Set up the controller based on type
         if controller_type == "ps":
             print("Using Predictive Sampling controller")
@@ -93,7 +90,7 @@ class FrankaRosControl:
                 self.controller = MPPI(
                     self.task,
                     num_samples=2000,
-                    noise_level=0.001,
+                    noise_level=0.01,
                     temperature=0.001,
                 )
             elif control_mode_enum == ControlMode.CARTESIAN_SIMPLE_VI:
@@ -244,18 +241,8 @@ class FrankaRosControl:
         Send a cartesian pose command to the robot
         pose: [x, y, z, roll, pitch, yaw]
         """
-        # Transform the pose to the robot base frame
-        # MuJoCo controller is sometimes relative to a reference frame
-        Rbr = self.mj_data.site_xmat[self.controller.task.reference_id].reshape(3, 3)
-        rRBb = self.mj_data.site_xpos[self.controller.task.reference_id]
-
-        rGBb = rRBb + Rbr @ pose[0:3]
-        Rrg = Rotation.from_euler("xyz", pose[3:6])
-        # Rotate the desired pose from reference frame to robot base frame
-        Rbg = Rbr @ Rrg.as_matrix()
-        r = Rotation.from_matrix(Rbg)
-        quat = r.as_quat()  # [x, y, z, w]
-        quat = quat / jnp.linalg.norm(quat)
+        # Convert pose rpy to quaternion
+        quat = Rotation.from_euler("xyz", pose[3:6]).as_quat()
 
         # Create pose message
         pose_msg = {
@@ -268,9 +255,9 @@ class FrankaRosControl:
             },
             "pose": {
                 "position": {
-                    "x": float(rGBb[0]),
-                    "y": float(rGBb[1]),
-                    "z": float(rGBb[2]),
+                    "x": float(pose[0]),
+                    "y": float(pose[1]),
+                    "z": float(pose[2]),
                 },
                 "orientation": {
                     "x": float(quat[0]),
@@ -280,9 +267,6 @@ class FrankaRosControl:
                 },
             },
         }
-
-        # Save the desired pose as a single 7D vector: [x, y, z, qx, qy, qz, qw]
-        self.desired_pose = np.concatenate([rGBb, quat])
 
         # Publish the pose message
         self.cartesian_pose_pub.publish(roslibpy.Message(pose_msg))
@@ -347,34 +331,31 @@ class FrankaRosControl:
         viewer.user_scn.ngeom += 1
 
     def _visualize_desired_pose(self, viewer):
-        """Visualize the desired pose with a sphere and label"""
-        if not hasattr(self, "desired_pose"):
-            return
-
+        """Visualize the desired poses with red spheres"""
         # Add sphere for desired pose
-        geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
-        mujoco.mjv_initGeom(
-            geom,
-            type=mujoco.mjtGeom.mjGEOM_SPHERE,
-            size=[0.02, 0, 0],
-            pos=self.desired_pose[:3],
-            mat=np.eye(3).flatten(),
-            rgba=[1.0, 0.0, 0.0, 0.8],
-        )
-        viewer.user_scn.ngeom += 1
-
-        # Add label for desired pose
-        geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
-        mujoco.mjv_initGeom(
-            geom,
-            type=mujoco.mjtGeom.mjGEOM_LABEL,
-            size=np.array([0.15, 0.15, 0.15]),
-            pos=self.desired_pose[:3] + np.array([0.0, 0.0, 0.05]),
-            mat=np.eye(3).flatten(),
-            rgba=np.array([1, 1, 1, 1]),
-        )
-        geom.label = "Target"
-        viewer.user_scn.ngeom += 1
+        for i in range(self.task.planning_horizon):
+            geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
+            mujoco.mjv_initGeom(
+                geom,
+                type=mujoco.mjtGeom.mjGEOM_SPHERE,
+                size=[0.01, 0, 0],
+                pos=self.policy_params.mean[i, :3],
+                mat=np.eye(3).flatten(),
+                rgba=[1.0, 0.0, 0.0, 0.8],
+            )
+            viewer.user_scn.ngeom += 1
+            # Add label for desired pose
+            geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
+            mujoco.mjv_initGeom(
+                geom,
+                type=mujoco.mjtGeom.mjGEOM_LABEL,
+                size=np.array([0.15, 0.15, 0.15]),
+                pos=self.policy_params.mean[i, :3] + np.array([0.0, 0.0, 0.05]),
+                mat=np.eye(3).flatten(),
+                rgba=np.array([1, 1, 1, 1]),
+            )
+            geom.label = f"{i}"
+            viewer.user_scn.ngeom += 1
 
     def _plot_histories(
         self, cost_history, p_gain_history, d_gain_history, control_history
@@ -463,12 +444,22 @@ class FrankaRosControl:
     def run_control_loop(self, frequency=10, duration=None, enable_viewer=False):
         """
         Run the control loop at the specified frequency
-        frequency: control frequency in Hz
+        frequency: requested control frequency in Hz
         duration: duration in seconds (None for infinite)
         enable_viewer: whether to enable the MuJoCo viewer for debugging
-        fixed_camera_id: camera ID for fixed camera view
         """
-        period = 1.0 / frequency
+        # Calculate actual control frequency based on requested frequency and model timestep
+        sim_steps_per_replan = max(
+            int(1.0 / (frequency * self.mj_model.opt.timestep)), 1
+        )
+        step_dt = sim_steps_per_replan * self.mj_model.opt.timestep
+        actual_frequency = 1.0 / step_dt
+        print(
+            f"Planning at {actual_frequency} Hz, "
+            f"simulating at {1.0 / self.mj_model.opt.timestep} Hz"
+        )
+
+        period = step_dt
         start_time = time.time()
         iteration = 0
 
@@ -487,7 +478,7 @@ class FrankaRosControl:
         keyboard_step_size = 0.01
         mocap_index = 0  # Index of mocap body to control
 
-        print(f"Starting control loop at {frequency} Hz")
+        print(f"Starting control loop at {actual_frequency} Hz")
 
         # Define keyboard callback
         def key_callback(keycode):
