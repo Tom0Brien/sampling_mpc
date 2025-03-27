@@ -94,8 +94,12 @@ class MPPI(SamplingBasedController):
                 self.task.nu_total,
             ),
         )
+
+        # Time shift mean by one control step, setting the last control to the N-1 control
+        mean = jnp.concatenate([params.mean[1:], params.mean[-1:]])
+
         # Apply dimension-specific noise scaling
-        controls = params.mean + noise * self.noise_level[None, None, :]
+        controls = mean + noise * self.noise_level[None, None, :]
         return controls, params.replace(rng=rng)
 
     def update_params(self, params: MPPIParams, rollouts: Trajectory) -> MPPIParams:

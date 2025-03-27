@@ -79,7 +79,10 @@ class CEM(SamplingBasedController):
                 self.task.nu_total,
             ),
         )
-        controls = params.mean + params.cov * noise
+
+        # Time shift mean by one control step, setting the last control to the N-1 control
+        mean = jnp.concatenate([params.mean[1:], params.mean[-1:]])
+        controls = mean + noise * params.cov
         return controls, params.replace(rng=rng)
 
     def update_params(self, params: CEMParams, rollouts: Trajectory) -> CEMParams:
