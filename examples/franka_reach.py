@@ -5,7 +5,7 @@ import mujoco
 import numpy as np
 import jax.numpy as jnp
 
-from hydrax.algs import MPPI, Evosax, PredictiveSampling
+from hydrax.algs import MPPI, Evosax, PredictiveSampling, CEM
 from hydrax.simulation.deterministic import run_interactive
 from hydrax.tasks.franka_reach import FrankaReach
 from hydrax.task_base import ControlMode
@@ -32,6 +32,29 @@ def main():
         f"Control dimensions: {task.nu_ctrl} (controls) + {task.nu_total - task.nu_ctrl} (gains) = {task.nu_total}"
     )
 
+    noise_level = None
+    initial_control = None
+    if control_mode == ControlMode.GENERAL_VI:
+        print("Running general VI")
+        noise_level = np.array([0.01] * 6 + [1] * 12)
+        initial_control = jnp.tile(
+            jnp.array([0.5, 0.0, 0.4, -3.14, 0.0, 0.0, 300, 50]),
+            (task.planning_horizon, 1),
+        )
+    elif control_mode == ControlMode.CARTESIAN_SIMPLE_VI:
+        print("Running cartesian simple VI")
+        noise_level = np.array([0.01] * 6 + [1] * 2)
+        initial_control = jnp.tile(
+            jnp.array([0.5, 0.0, 0.4, -3.14, 0.0, 0.0, 300, 50]),
+            (task.planning_horizon, 1),
+        )
+    else:
+        print("Running general")
+        noise_level = np.array([0.01] * 6)
+        initial_control = jnp.tile(
+            jnp.array([0.5, 0.0, 0.4, -3.14, 0.0, 0.0]),
+            (task.planning_horizon, 1),
+        )
     # Set the controller based on command-line arguments
     if args.algorithm == "ps" or args.algorithm is None:
         print("Running predictive sampling")
@@ -43,56 +66,18 @@ def main():
 
     elif args.algorithm == "mppi":
         print("Running MPPI")
-        if control_mode == ControlMode.GENERAL_VI:
-            # Individual gain optimization (6 controls + 12 gains)
-            ctrl = MPPI(
-                task,
-                num_samples=2000,
-                noise_level=np.array(
-                    [
-                        0.01,  # x reference noise level
-                        0.01,  # y reference noise level
-                        0.01,  # z reference noise level
-                        0.01,  # roll reference noise level
-                        0.01,  # pitch reference noise level
-                        0.01,  # yaw reference noise level
-                        1,  # kp x noise level
-                        1,  # kp y noise level
-                        1,  # kp z noise level
-                        1,  # kp roll noise level
-                        1,  # kp pitch noise level
-                        1,  # kp yaw noise level
-                        1,  # kd x noise level
-                        1,  # kd y noise level
-                        1,  # kd z noise level
-                        1,  # kd roll noise level
-                        1,  # kd pitch noise level
-                        1,  # kd yaw noise level
-                    ]
-                ),
-                temperature=0.001,
-            )
-        elif control_mode == ControlMode.CARTESIAN_SIMPLE_VI:
-            # Simple gain optimization (6 controls + 2 gains)
-            ctrl = MPPI(
-                task,
-                num_samples=2000,
-                noise_level=np.array(
-                    [
-                        0.01,  # x reference noise level
-                        0.01,  # y reference noise level
-                        0.01,  # z reference noise level
-                        0.01,  # roll reference noise level
-                        0.01,  # pitch reference noise level
-                        0.01,  # yaw reference noise level
-                        1,  # translational p-gain noise level
-                        1,  # rotational p-gain noise level
-                    ]
-                ),
-                temperature=0.001,
-            )
-        else:
-            ctrl = MPPI(task, num_samples=2000, noise_level=0.01, temperature=0.001)
+        ctrl = MPPI(
+            task,
+            num_samples=2000,
+            noise_level=noise_level,
+            temperature=0.001,
+        )
+
+    elif args.algorithm == "cem":
+        print("Running CEM")
+        ctrl = CEM(
+            task, num_samples=512, num_elites=20, sigma_start=0.1, sigma_min=0.05
+        )
 
     elif args.algorithm == "cmaes":
         print("Running CMA-ES")
@@ -100,7 +85,7 @@ def main():
 
     elif args.algorithm == "samr":
         print("Running genetic algorithm with Self-Adaptation Mutation Rate (SAMR)")
-        ctrl = Evosax(task, evosax.SAMR_GA, num_samples=128)
+        ctrl = Evosax(task, evosax.SAMR_GA, num_samples=2000)
 
     elif args.algorithm == "de":
         print("Running Differential Evolution (DE)")
@@ -135,27 +120,6 @@ def main():
     mj_data = mujoco.MjData(mj_model)
     # Set the initial joint positions
     mj_data.qpos[:7] = [-0.196, -0.189, 0.182, -2.1, 0.0378, 1.91, 0.756]
-
-    # Define the initial control (tile to planning horizon)
-    if control_mode == ControlMode.CARTESIAN or control_mode == ControlMode.GENERAL:
-        initial_control = jnp.tile(
-            jnp.array(
-                [
-                    0.5,  # x reference
-                    0.0,  # y reference
-                    0.4,  # z reference
-                    -3.14,  # roll reference
-                    0.0,  # pitch reference
-                    0.0,  # yaw reference
-                ]
-            ),
-            (task.planning_horizon, 1),
-        )
-    elif control_mode == ControlMode.CARTESIAN_SIMPLE_VI:
-        initial_control = jnp.tile(
-            jnp.array([0.5, 0.0, 0.4, -3.14, 0.0, 0.0, 300, 50]),
-            (task.planning_horizon, 1),
-        )
 
     # Run the interactive simulation
     run_interactive(

@@ -4,7 +4,7 @@ import mujoco
 import numpy as np
 import jax.numpy as jnp
 
-from hydrax.algs import MPPI, Evosax, PredictiveSampling
+from hydrax.algs import MPPI, Evosax, PredictiveSampling, CEM
 from hydrax.simulation.deterministic import run_interactive
 from hydrax.tasks.particle3d import Particle3D
 from hydrax.task_base import ControlMode
@@ -33,35 +33,46 @@ def main():
         f"Control dimensions: {task.nu_ctrl} (controls) + {task.nu_total - task.nu_ctrl} (gains) = {task.nu_total}"
     )
 
+    noise_level = None
+    initial_control = None
+    if control_mode == ControlMode.GENERAL:
+        noise_level = 0.01
+        initial_control = jnp.broadcast_to(
+            jnp.array([0.5, 0.0, 0.4]), (task.planning_horizon, 3)
+        )
+    elif control_mode == ControlMode.GENERAL_VI:
+        noise_level = np.array([0.01, 0.01, 0.01, 1, 1, 1])
+        initial_control = jnp.broadcast_to(
+            jnp.array([0.5, 0.0, 0.4, 1, 1, 1]), (task.planning_horizon, 3)
+        )
+
     # Set the controller based on command-line arguments
     if args.algorithm == "ps" or args.algorithm is None:
         print("Running predictive sampling")
         ctrl = PredictiveSampling(
             task,
             num_samples=2000,
-            noise_level=0.001,
+            noise_level=noise_level,
+        )
+
+    if args.algorithm == "cem" or args.algorithm is None:
+        print("Running CEM")
+        ctrl = CEM(
+            task,
+            num_samples=128,
+            num_elites=20,
+            sigma_start=0.05,
+            sigma_min=0.005,
+            explore_fraction=0.5,
         )
 
     elif args.algorithm == "mppi":
         print("Running MPPI")
-        if control_mode == ControlMode.GENERAL:
-            ctrl = MPPI(task, num_samples=2000, noise_level=0.01, temperature=0.001)
-        elif control_mode == ControlMode.GENERAL_VI:
-            ctrl = MPPI(
-                task,
-                num_samples=1000,
-                noise_level=np.array(
-                    [0.01, 0.01, 0.01, 1, 1, 1, 1, 1, 1]
-                ),  # 3D controls + gains
-                temperature=0.001,
-            )
-        else:
-            # Not supported for this task
-            raise ValueError("Control mode not supported for this task")
+        ctrl = MPPI(task, num_samples=2000, noise_level=noise_level, temperature=0.001)
 
     elif args.algorithm == "cmaes":
         print("Running CMA-ES")
-        ctrl = Evosax(task, evosax.Sep_CMA_ES, num_samples=16, elite_ratio=0.5)
+        ctrl = Evosax(task, evosax.Sep_CMA_ES, num_samples=128, elite_ratio=0.5)
 
     elif args.algorithm == "samr":
         print("Running genetic algorithm with Self-Adaptation Mutation Rate (SAMR)")
@@ -93,17 +104,6 @@ def main():
     # Define the model used for simulation
     mj_model = task.mj_model
     mj_data = mujoco.MjData(mj_model)
-
-    initial_control = jnp.tile(
-        jnp.array(
-            [
-                0.5,  # x reference
-                0.0,  # y reference
-                0.4,  # z reference
-            ]
-        ),
-        (task.planning_horizon, 1),
-    )
 
     # Run the interactive simulation
     run_interactive(

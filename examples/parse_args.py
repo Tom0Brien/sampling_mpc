@@ -34,6 +34,7 @@ def parse_args():
     )
     subparsers.add_parser("ps", help="Predictive Sampling")
     subparsers.add_parser("mppi", help="Model Predictive Path Integral Control")
+    subparsers.add_parser("cem", help="Cross-Entropy Method")
     subparsers.add_parser("cmaes", help="CMA-ES")
     subparsers.add_parser(
         "samr", help="Genetic Algorithm with Self-Adaptation Mutation Rate (SAMR)"

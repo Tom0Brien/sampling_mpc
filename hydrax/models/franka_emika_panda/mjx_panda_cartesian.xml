@@ -38,7 +38,7 @@
 
   <default>
     <default class="translation">
-      <position kp="50" kv="14.14" ctrlrange="-1 1"/>
+      <position kp="100" kv="40" ctrlrange="-1 1"/>
     </default>
     <default class="rotation">
       <!--
@@ -47,7 +47,7 @@
       Increase this range to pi or bigger in order to see the instabillity.
       See here for more details https://mujoco.readthedocs.io/en/latest/XMLreference.html#actuator
       -->
-      <position kp="30" kv="10.95" ctrlrange="-3.14 3.14"/>
+      <position kp="30" kv="20" ctrlrange="-3.14 3.14"/>
     </default>
     <!--
     Clamping the total actuator torque at the joints means that the motion produced by the Cartesian
@@ -282,14 +282,14 @@
   </equality>
 
   <actuator>
-    <!-- <position name="x"  site="gripper" refsite="reference" gear="1 0 0 0 0 0" class="translation"/>
+    <position name="x"  site="gripper" refsite="reference" gear="1 0 0 0 0 0" class="translation"/>
     <position name="y"  site="gripper" refsite="reference" gear="0 1 0 0 0 0" class="translation"/>
     <position name="z"  site="gripper" refsite="reference" gear="0 0 1 0 0 0" class="translation"/>
     <position name="rx" site="gripper" refsite="reference" gear="0 0 0 1 0 0" class="rotation"/>
     <position name="ry" site="gripper" refsite="reference" gear="0 0 0 0 1 0" class="rotation"/>
-    <position name="rz" site="gripper" refsite="reference" gear="0 0 0 0 0 1" class="rotation"/> -->
+    <position name="rz" site="gripper" refsite="reference" gear="0 0 0 0 0 1" class="rotation"/>
 
-    <motor name="joint1_motor" joint="joint1" gear="1" ctrlrange="-87 87"/>
+    <!-- <motor name="joint1_motor" joint="joint1" gear="1" ctrlrange="-87 87"/>
     <motor name="joint2_motor" joint="joint2" gear="1" ctrlrange="-87 87"/>
     <motor name="joint3_motor" joint="joint3" gear="1" ctrlrange="-87 87"/>
     <motor name="joint4_motor" joint="joint4" gear="1" ctrlrange="-87 87"/>
@@ -299,6 +299,6 @@
     <general class="panda" name="actuator8" joint="finger_joint1"
      ctrlrange="0 0.04" gainprm="350 0 0" biasprm="0 -350 -10" forcerange="-200 200"/>
     <general class="panda" name="actuator9" joint="finger_joint2"
-     ctrlrange="0 0.04" gainprm="350 0 0" biasprm="0 -350 -10" forcerange="-200 200"/>
+     ctrlrange="0 0.04" gainprm="350 0 0" biasprm="0 -350 -10" forcerange="-200 200"/> -->
   </actuator>
 </mujoco>

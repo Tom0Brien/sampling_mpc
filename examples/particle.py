@@ -4,7 +4,7 @@ import mujoco
 import numpy as np
 import jax.numpy as jnp
 
-from hydrax.algs import MPPI, Evosax, PredictiveSampling
+from hydrax.algs import MPPI, Evosax, PredictiveSampling, CEM
 from hydrax.simulation.deterministic import run_interactive
 from hydrax.tasks.particle import Particle
 from hydrax.task_base import ControlMode
@@ -56,6 +56,12 @@ def main():
             # Not supported for this task
             raise ValueError("Control mode not supported for this task")
 
+    elif args.algorithm == "cem":
+        print("Running CEM")
+        ctrl = CEM(
+            task, num_samples=128, num_elites=20, sigma_start=0.1, sigma_min=0.05
+        )
+
     elif args.algorithm == "cmaes":
         print("Running CMA-ES")
         ctrl = Evosax(task, evosax.Sep_CMA_ES, num_samples=16, elite_ratio=0.5)
@@ -97,10 +103,10 @@ def main():
         mj_model,
         mj_data,
         frequency=50,
-        show_traces=True,
+        show_traces=False,
         max_traces=5,
         record_video=False,
-        plot_costs=True,
+        plot_costs=False,
         show_debug_info=True,
     )
 

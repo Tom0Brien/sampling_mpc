@@ -3,7 +3,7 @@ import argparse
 import evosax
 import mujoco
 import numpy as np
-from hydrax.algs import MPPI, Evosax, PredictiveSampling
+from hydrax.algs import MPPI, Evosax, PredictiveSampling, CEM
 from hydrax.simulation.deterministic import run_interactive
 from hydrax.tasks.pushbox import PushBox
 from hydrax.task_base import ControlMode
@@ -58,6 +58,11 @@ def main():
         else:
             # Not supported for this task
             raise ValueError("Control mode not supported for this task")
+    elif args.algorithm == "cem" or args.algorithm is None:
+        print("Running CEM")
+        ctrl = CEM(
+            task, num_samples=2000, num_elites=20, sigma_start=0.1, sigma_min=0.1
+        )
 
     elif args.algorithm == "cmaes":
         print("Running CMA-ES")
@@ -113,13 +118,14 @@ def main():
         mj_model,
         mj_data,
         frequency=50,
-        show_traces=True,
+        show_traces=False,
         max_traces=6,
         trace_width=6,
         trace_color=[0.0, 0.0, 1.0, 0.1],
         record_video=True,
-        plot_costs=True,
-        show_debug_info=True,
+        plot_costs=False,
+        show_debug_info=False,
+        keyboard_step_size=0.05,
     )
 
 
