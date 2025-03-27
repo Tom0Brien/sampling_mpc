@@ -19,12 +19,12 @@ class EvosaxParams:
     """Policy parameters for evosax optimizers.
 
     Attributes:
-        controls: The latest control sequence, U = [u₀, u₁, ..., ].
+        mean: The latest control sequence, U = [u₀, u₁, ..., ].
         opt_state: The state of the evosax optimizer (covariance, etc.).
         rng: The pseudo-random number generator key.
     """
 
-    controls: jax.Array
+    mean: jax.Array
     opt_state: EvoState
     rng: jax.Array
 
@@ -82,7 +82,7 @@ class Evosax(SamplingBasedController):
         if initial_control is not None:
             controls = initial_control
         opt_state = self.strategy.initialize(init_rng, self.es_params)
-        return EvosaxParams(controls=controls, opt_state=opt_state, rng=rng)
+        return EvosaxParams(mean=controls, opt_state=opt_state, rng=rng)
 
     def sample_controls(self, params: EvosaxParams) -> Tuple[jax.Array, EvosaxParams]:
         """Sample control sequences from the proposal distribution."""
@@ -119,10 +119,10 @@ class Evosax(SamplingBasedController):
             best_member=x[best_idx], best_fitness=costs[best_idx]
         )
 
-        return params.replace(controls=best_controls, opt_state=opt_state)
+        return params.replace(mean=best_controls, opt_state=opt_state)
 
     def get_action(self, params: EvosaxParams, t: float) -> jax.Array:
         """Get the control action for the current time step, zero order hold."""
         idx_float = (t + self.task.dt) / self.task.dt  # zero order hold
         idx = jnp.floor(idx_float).astype(jnp.int32)
-        return params.controls[0]
+        return params.mean[idx]
