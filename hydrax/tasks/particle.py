@@ -64,8 +64,13 @@ class Particle(Task):
         position_cost = jnp.sum(
             jnp.square(state.site_xpos[self.particle_id] - state.mocap_pos[0])
         )
-        control_cost = jnp.sum(jnp.square(state.actuator_force))
-        return 1e1 * position_cost + 1 * control_cost
+
+        # Penalize control effort (distance between reference and particle)
+        control_cost = jnp.sum(
+            jnp.square(state.ctrl[:2] - state.site_xpos[self.particle_id][:2])
+        )
+
+        return 1e2 * position_cost + 1e1 * control_cost
 
     def domain_randomize_model(self, rng: jax.Array) -> Dict[str, jax.Array]:
         """Randomly perturb the actuator gains."""

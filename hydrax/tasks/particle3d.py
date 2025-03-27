@@ -71,7 +71,7 @@ class Particle3D(Task):
             jnp.square(state.ctrl - state.site_xpos[self.particle_id])
         )
 
-        return 100 * position_cost + 10 * control_cost
+        return 1e2 * position_cost + 1e1 * control_cost
 
     def domain_randomize_model(self, rng: jax.Array) -> Dict[str, jax.Array]:
         """Randomly perturb the actuator gains."""
