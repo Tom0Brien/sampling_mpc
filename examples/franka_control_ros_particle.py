@@ -11,7 +11,8 @@ from scipy.spatial.transform import Rotation
 from matplotlib import pyplot as plt
 
 
-from hydrax.algs import MPPI, PredictiveSampling
+from hydrax.algs import MPPI, PredictiveSampling, CEM
+from hydrax import ROOT
 from hydrax.tasks.particle3d import Particle3D
 from hydrax.task_base import ControlMode
 from parse_args import control_mode_map
@@ -42,7 +43,6 @@ class FrankaRosControl:
             "/franka_state_controller/franka_states",
             "franka_msgs/FrankaState",
         )
-        self.franka_state_sub.subscribe(self.franka_state_callback)
 
         # Setup publisher for cartesian pose commands
         self.cartesian_pose_pub = roslibpy.Topic(
@@ -77,6 +77,11 @@ class FrankaRosControl:
         self.mj_data = mujoco.MjData(self.mj_model)
         self.mjx_data = mjx.put_data(self.mj_model, self.mj_data)
 
+        # Add a franka model
+        self.franka_model = mujoco.MjModel.from_xml_path(
+            ROOT + "/models/franka_emika_panda/mjx_scene_reach.xml"
+        )
+        self.franka_data = mujoco.MjData(self.franka_model)
         # Set the initial joint positions - not needed for particle task
         # self.mj_data.qpos[:7] = [-0.196, -0.189, 0.182, -2.1, 0.0378, 1.91, 0.756]
 
@@ -96,6 +101,16 @@ class FrankaRosControl:
                 noise_level=0.01,
                 temperature=0.001,
             )
+        if controller_type == "cem":
+            print("Running CEM")
+            self.controller = CEM(
+                self.task,
+                num_samples=128,
+                num_elites=20,
+                sigma_start=0.1,
+                sigma_min=0.01,
+            )
+
         else:
             raise ValueError(f"Unsupported controller type: {controller_type}")
 
@@ -130,8 +145,11 @@ class FrankaRosControl:
             initial_control=initial_control
         )
 
-        # Set up joint state callback
+        # Set up joint and franka state callbacks
+        self.ee_position = np.zeros(3)
+        self.ee_velocity = np.zeros(6)
         self.joint_state_sub.subscribe(self.joint_state_callback)
+        self.franka_state_sub.subscribe(self.franka_state_callback)
 
         # Wait for first joint state message
         print("Waiting for joint state messages...")
@@ -151,23 +169,37 @@ class FrankaRosControl:
     def franka_state_callback(self, message):
         """Callback for franka state messages"""
         # Extract franka state
-        transform_matrix = np.transpose(np.reshape(message["O_T_EE"], (4, 4)))
+        q = np.concatenate([np.array(message["q"]), np.zeros(2)])
+        dq = np.concatenate([np.array(message["dq"]), np.zeros(2)])
 
-        # Extract position from the transformation matrix
-        self.ee_position = transform_matrix[:3, 3]
+        # Update franka model with latest joint positions and velocities
+        self.franka_data.qpos = q
+        self.franka_data.qvel = dq
+        mujoco.mj_forward(self.franka_model, self.franka_data)
+
+        # Get franka jacobian and compute ee velocity
+        gripper_site_id = self.franka_model.site("gripper").id
+        self.ee_position = self.franka_data.site_xpos[gripper_site_id]
+        J = np.zeros((6, self.franka_model.nv))
+        mujoco.mj_jacSite(
+            self.franka_model, self.franka_data, J[:3, :], J[3:, :], gripper_site_id
+        )
+        self.ee_velocity = J @ dq
 
     def update_controller_state(self):
         """Update the controller's state with latest robot state"""
         # For particle task, we only need position and velocity
         qpos = self.mj_data.qpos
+        qvel = self.mj_data.qvel
         qpos[:3] = self.ee_position
+        qvel = self.ee_velocity
         self.mjx_data = self.mjx_data.replace(
             qpos=qpos,
-            qvel=jnp.array(np.zeros(6)),  # TODO: Get ee velocity from franka state
+            qvel=qvel,
         )
         # Store a CPU version of the state for visualization and transforms
         self.mj_data.qpos = qpos
-        self.mj_data.qvel = np.zeros(6)  # TODO: Get ee velocity from franka state
+        self.mj_data.qvel = qvel
         mujoco.mj_forward(self.mj_model, self.mj_data)
 
     def update_compliance_params(
@@ -615,8 +647,8 @@ def main():
         "--controller",
         type=str,
         default="ps",
-        choices=["ps", "mppi"],
-        help="Controller type (ps for Predictive Sampling, mppi for MPPI)",
+        choices=["ps", "mppi", "cem"],
+        help="Controller type (ps for Predictive Sampling, mppi for MPPI, cem for CEM)",
     )
     parser.add_argument(
         "--control-mode",
