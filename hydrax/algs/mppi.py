@@ -95,7 +95,7 @@ class MPPI(SamplingBasedController):
             ),
         )
 
-        # Time shift mean by one control step, setting the last control to the N-1 control
+        # Warm-start:Time shift mean by one control step (holding last control)
         mean = jnp.concatenate([params.mean[1:], params.mean[-1:]])
 
         # Apply dimension-specific noise scaling
