@@ -61,7 +61,12 @@ def main():
     elif args.algorithm == "cem" or args.algorithm is None:
         print("Running CEM")
         ctrl = CEM(
-            task, num_samples=2000, num_elites=20, sigma_start=0.1, sigma_min=0.1
+            task,
+            num_samples=2000,
+            num_elites=20,
+            sigma_start=0.1,
+            sigma_min=0.005,
+            explore_fraction=0.5,
         )
 
     elif args.algorithm == "cmaes":
