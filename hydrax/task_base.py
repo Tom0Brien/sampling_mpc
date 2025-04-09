@@ -99,7 +99,7 @@ class Task(ABC):
 
         # For cartesian control, set default nullspace configuration and stiffness
         self.q_d_nullspace = jnp.zeros(mj_model.nv)
-        self.nullspace_stiffness = 1.0
+        self.nullspace_stiffness = 10.0
 
         # Configure control dimensions and limits based on control mode
         self._configure_control_dimensions()

@@ -13,66 +13,13 @@ import mujoco.viewer
 from mujoco import mjx
 from typing import Tuple, List, Optional
 from mujoco.mjx._src.support import jac
-from util import *
-import os 
+from hydrax import ROOT
+from hydrax.util import *
+from hydrax.controllers.impedance_controllers import impedance_control_mjx
+import os
 
 # Set XLA flags for better performance
 os.environ["XLA_FLAGS"] = "--xla_gpu_triton_gemm_any=true "
-
-
-def impedance_control_mjx(
-    model_mjx,
-    data_mjx,
-    p_des: jnp.ndarray,
-    eul_des: jnp.ndarray,
-    Kp: jnp.ndarray,
-    Kd: jnp.ndarray,
-    nullspace_stiffness: float,
-    q_d_nullspace: jnp.ndarray,
-    site_id: int = None,
-) -> jnp.ndarray:
-    """
-    Compute Cartesian pose impedance control torque using MJX.
-    Designed to work with JAX transformations (jit, vmap).
-    """
-    # Run forward dynamics
-    data_mjx = mjx.forward(model_mjx, data_mjx)
-    q = data_mjx.qpos
-    dq = data_mjx.qvel
-
-    # End-effector pose
-    p_curr = data_mjx.site_xpos[site_id]
-    rot_ee = data_mjx.site_xmat[site_id].reshape((3, 3))
-    quat_curr = mat_to_quat(rot_ee)
-
-    # Get jacobians for the site
-    jacp, jacr = jac(model_mjx, data_mjx, p_curr, 8)
-    jacp = jacp.T
-    jacr = jacr.T
-    J = jnp.concatenate([jacp, jacr], axis=0)
-
-    # Compute positional/orientation errors
-    e_pos = p_curr - p_des
-    e_ori = orientation_error(quat_curr, eul_to_quat(eul_des), rot_ee)
-    e = jnp.concatenate([e_pos, e_ori], axis=0)
-
-    # End-effector velocity in task space
-    v = J @ dq
-
-    # Cartesian impedance
-    F_ee_des = -Kp @ e - Kd @ v
-    tau_task = J.T @ F_ee_des
-
-    # Nullspace control
-    Jt_pinv = pseudo_inverse(J.T)
-    proj = jnp.eye(model_mjx.nv) - (J.T @ Jt_pinv)
-    dn = 2.0 * jnp.sqrt(nullspace_stiffness)
-    tau_null = proj @ (nullspace_stiffness * (q_d_nullspace - q) - dn * dq)
-
-    # Coriolis Compensation (no gravity compensation in Franka example)
-    tau_cor = data_mjx.qfrc_bias - data_mjx.qfrc_gravcomp
-
-    return tau_task + tau_cor + tau_null
 
 
 def run_parallel_simulations(
@@ -141,7 +88,7 @@ def run_parallel_simulations(
     Kp = jnp.diag(jnp.array([300, 300, 300, 50, 50, 50], dtype=float))
     # 2 * square root of Kp
     Kd = 2.0 * jnp.sqrt(Kp)
-    nullspace_stiffness = 0.01
+    nullspace_stiffness = 10
 
     # Define control function for a single simulation
     def control_step(data, p_des, eul_des):
@@ -167,7 +114,7 @@ def run_parallel_simulations(
     # JIT compile for efficiency
     jit_vmap_control_step = jax.jit(vmap_control_step)
     jit_vmap_control_step(data_batch, p_des_array, eul_des_array)
-    
+
     # Initialize storage for rollouts
     rollouts = [[None for _ in range(N)] for _ in range(K)]
 
@@ -277,7 +224,7 @@ def visualize_rollouts(
 
 
 if __name__ == "__main__":
-    xml_path = "models/franka_emika_panda/mjx_scene.xml"
+    xml_path = ROOT + "/models/franka_emika_panda/mjx_scene.xml"
     model = mujoco.MjModel.from_xml_path(xml_path)
 
     # Set up simulation parameters
@@ -287,7 +234,7 @@ if __name__ == "__main__":
     render_fps = 60.0
 
     # Desired pose in position + Euler angles
-    p_des = jnp.array([0.5, 0.0, 0.3])
+    p_des = jnp.array([0.5, 0.10, 0.3])
     eul_des = jnp.array([-3.14, 0.0, 0.0])
 
     # Run parallel simulations

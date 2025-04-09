@@ -31,7 +31,7 @@ if __name__ == "__main__":
     Kp = jnp.diag(jnp.array([300, 300, 300, 50, 50, 50], dtype=float))
     # 2 * square root of Kp
     Kd = 2.0 * jnp.sqrt(Kp)
-    nullspace_stiffness = 0.0
+    nullspace_stiffness = 10.0
 
     body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "link7")
     print("body_id: ", body_id)
