@@ -14,6 +14,7 @@ from matplotlib import pyplot as plt
 from hydrax.algs import MPPI, PredictiveSampling, CEM
 from hydrax import ROOT
 from hydrax.tasks.particle3d import Particle3D
+from hydrax.tasks.particle_collision import ParticleCollision
 from hydrax.task_base import ControlMode
 from parse_args import control_mode_map
 
@@ -72,14 +73,15 @@ class FrankaRosControl:
         control_mode_enum = control_mode_map[control_mode]
 
         # Initialize the Hydrax task and controller
-        self.task = Particle3D(control_mode=control_mode_enum)
+        # self.task = Particle3D(control_mode=control_mode_enum)
+        self.task = ParticleCollision(control_mode=control_mode_enum)
         self.mj_model = self.task.mj_model
         self.mj_data = mujoco.MjData(self.mj_model)
         self.mjx_data = mjx.put_data(self.mj_model, self.mj_data)
 
         # Add a franka model
         self.franka_model = mujoco.MjModel.from_xml_path(
-            ROOT + "/models/franka_emika_panda/mjx_scene_reach.xml"
+            ROOT + "/models/franka_emika_panda/mjx_panda_cartesian.xml"
         )
         self.franka_data = mujoco.MjData(self.franka_model)
         # Set the initial joint positions - not needed for particle task
@@ -105,10 +107,11 @@ class FrankaRosControl:
             print("Running CEM")
             self.controller = CEM(
                 self.task,
-                num_samples=128,
+                num_samples=512,
                 num_elites=20,
-                sigma_start=0.1,
-                sigma_min=0.01,
+                sigma_start=0.025,
+                sigma_min=0.005,
+                explore_fraction=0.5,
             )
 
         else:
@@ -127,7 +130,7 @@ class FrankaRosControl:
                 [
                     0.5,  # x reference
                     0.0,  # y reference
-                    0.4,  # z reference
+                    0.5,  # z reference
                 ]
             ),
             (self.task.planning_horizon, 1),
@@ -156,6 +159,7 @@ class FrankaRosControl:
         while self.current_joint_positions is None:
             time.sleep(0.1)
         print("Received initial joint state")
+        self.update_controller_state()
 
         # Calculate control frequency parameters will be done in run_control_loop
         # since that's where we receive the requested frequency
