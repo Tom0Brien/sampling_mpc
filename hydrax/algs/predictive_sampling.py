@@ -68,10 +68,13 @@ class PredictiveSampling(SamplingBasedController):
                 self.task.nu_total,
             ),
         )
-        controls = params.mean + self.noise_level * noise
+
+        # Warm-start:Time shift mean by one control step (holding last control)
+        mean = jnp.concatenate([params.mean[1:], params.mean[-1:]])
+        controls = mean + self.noise_level * noise
 
         # The original mean of the distribution is included as a sample
-        controls = controls.at[0].set(params.mean)
+        controls = controls.at[0].set(mean)
 
         return controls, params.replace(rng=rng)
 
