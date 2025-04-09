@@ -179,7 +179,9 @@ def run_interactive(
 
                 # Add visualizations if debug info is enabled
                 if show_debug_info:
-                    add_debug_visualizations(viewer, controller, mj_data, u, total_cost)
+                    add_debug_visualizations(
+                        viewer, controller, mj_data, policy_params, total_cost
+                    )
 
                 # Step simulation and update viewer
                 mujoco.mj_step(mj_model, mj_data)
@@ -345,28 +347,42 @@ def apply_control(
         control_history.append(np.array(ctrl))
 
 
-def add_debug_visualizations(viewer, controller, mj_data, u, total_cost):
+def add_debug_visualizations(viewer, controller, mj_data, policy_params, total_cost):
     """Add debug visualizations to the scene."""
     # Visualize reference position if available
     if hasattr(controller.task, "reference_id"):
-        geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
         Rbr = mj_data.site_xmat[controller.task.reference_id].reshape(3, 3)
         rRBb = mj_data.site_xpos[controller.task.reference_id]
+        for i in range(controller.task.planning_horizon):
+            if controller.task.nu_ctrl == 2:
+                reference_pos = rRBb + Rbr @ np.array(
+                    [policy_params.mean[i, 0], policy_params.mean[i, 1], 0.0]
+                )
+            else:
+                reference_pos = rRBb + Rbr @ policy_params.mean[i, :3]
 
-        if controller.task.nu_ctrl == 2:
-            reference_pos = rRBb + Rbr @ np.array([u[0], u[1], 0.0])
-        else:
-            reference_pos = rRBb + Rbr @ np.array([u[0], u[1], u[2]])
+            geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
+            mujoco.mjv_initGeom(
+                geom,
+                type=mujoco.mjtGeom.mjGEOM_SPHERE,
+                size=[0.01, 0, 0],
+                pos=reference_pos,
+                mat=np.eye(3).flatten(),
+                rgba=[1.0, 0.0, 0.0, 0.1],
+            )
+            viewer.user_scn.ngeom += 1
 
-        mujoco.mjv_initGeom(
-            geom,
-            type=mujoco.mjtGeom.mjGEOM_SPHERE,
-            size=[0.01, 0, 0],
-            pos=reference_pos,
-            mat=np.eye(3).flatten(),
-            rgba=[1.0, 0.0, 0.0, 0.1],
-        )
-        viewer.user_scn.ngeom += 1
+            geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
+            mujoco.mjv_initGeom(
+                geom,
+                type=mujoco.mjtGeom.mjGEOM_LABEL,
+                size=np.array([0.15, 0.15, 0.15]),
+                pos=reference_pos + np.array([0.0, 0.0, 0.01]),
+                mat=np.eye(3).flatten(),
+                rgba=np.array([1, 1, 1, 1]),
+            )
+            geom.label = f"{i}"
+            viewer.user_scn.ngeom += 1
 
     # Add cost text
     cost_pos = np.array([0.0, 0.0, 0.5])  # Position above the scene
