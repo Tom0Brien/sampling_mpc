@@ -29,15 +29,12 @@ def impedance_control_mjx(
     Compute Cartesian pose impedance control torque using MJX.
     Designed to work with JAX transformations (jit, vmap).
     """
-    # Run forward dynamics
-    data_mjx = mjx.forward(model_mjx, data_mjx)
     q = data_mjx.qpos
     dq = data_mjx.qvel
 
     # End-effector pose
     p_curr = data_mjx.site_xpos[site_id]
-    rot_ee = data_mjx.site_xmat[site_id].reshape((3, 3))
-    quat_curr = mat_to_quat(rot_ee)
+    quat_curr = mat_to_quat(data_mjx.site_xmat[site_id].reshape((3, 3)))
 
     # Get jacobians for the site TODO: fix this hardcoded site_id
     jacp, jacr = jac(model_mjx, data_mjx, p_curr, 8)
@@ -76,13 +73,11 @@ def impedance_control(
     """
     Compute Cartesian pose impedance control torque using mujoco.
     """
-    mujoco.mj_forward(model, data)
     q = jnp.array(data.qpos)
     dq = jnp.array(data.qvel)
     # End-effector pose
     p_curr = jnp.array(data.site_xpos[site_id])
-    rot_ee = jnp.array(data.site_xmat[site_id].reshape((3, 3)))
-    quat_curr = mat_to_quat(rot_ee)
+    quat_curr = mat_to_quat(jnp.array(data.site_xmat[site_id].reshape((3, 3))))
 
     # Jacobian
     J = np.zeros((6, model.nv))
@@ -110,6 +105,5 @@ def impedance_control(
     tau_null = proj @ (nullspace_stiffness * (q_d_nullspace - q) - dn * dq)
 
     # Coriolis compensation only (Gravity compensation added by default in MuJoCo and Franka arms)
-    mujoco.mj_inverse(model, data)
     tau_cor = jnp.array(data.qfrc_bias) - jnp.array(data.qfrc_gravcomp)
     return tau_task + tau_cor + tau_null

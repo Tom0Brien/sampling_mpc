@@ -33,18 +33,10 @@ def main():
         f"Control dimensions: {task.nu_ctrl} (controls) + {task.nu_total - task.nu_ctrl} (gains) = {task.nu_total}"
     )
 
-    noise_level = None
-    initial_control = None
-    if control_mode == ControlMode.GENERAL:
-        noise_level = 0.01
-        initial_control = jnp.broadcast_to(
-            jnp.array([0.5, 0.0, 0.4]), (task.planning_horizon, 3)
-        )
-    elif control_mode == ControlMode.GENERAL_VI:
-        noise_level = np.array([0.01, 0.01, 0.01, 1, 1, 1])
-        initial_control = jnp.broadcast_to(
-            jnp.array([0.5, 0.0, 0.4, 1, 1, 1]), (task.planning_horizon, 3)
-        )
+    noise_level = np.array([0.01, 0.01, 0.01])
+    initial_control = jnp.broadcast_to(
+        jnp.array([0.5, 0.0, 0.4]), (task.planning_horizon, 3)
+    )
 
     # Set the controller based on command-line arguments
     if args.algorithm == "ps" or args.algorithm is None:

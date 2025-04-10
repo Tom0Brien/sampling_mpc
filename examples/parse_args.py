@@ -4,10 +4,7 @@ from hydrax.task_base import ControlMode
 
 control_mode_map = {
     "general": ControlMode.GENERAL,
-    "general_vi": ControlMode.GENERAL_VI,
     "cartesian": ControlMode.CARTESIAN,
-    "cartesian_vi": ControlMode.CARTESIAN_VI,
-    "cartesian_simple_vi": ControlMode.CARTESIAN_SIMPLE_VI,
 }
 
 
@@ -19,15 +16,9 @@ def parse_args():
     parser.add_argument(
         "--control-mode",
         type=str,
-        choices=[
-            "general",
-            "general_vi",
-            "cartesian",
-            "cartesian_vi",
-            "cartesian_simple_vi",
-        ],
+        choices=["general", "cartesian"],
         default="general",
-        help="Control mode (general, general_vi, cartesian, cartesian_vi, cartesian_simple_vi)",
+        help="Control mode (general or cartesian)",
     )
     subparsers = parser.add_subparsers(
         dest="algorithm", help="Sampling algorithm (choose one)"

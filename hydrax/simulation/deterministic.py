@@ -110,8 +110,6 @@ def run_interactive(
 
     # Initialize history tracking
     cost_history = []
-    p_gain_history = []
-    d_gain_history = []
     control_history = []
 
     # Define keyboard callback
@@ -167,15 +165,30 @@ def run_interactive(
                 cost_history.append(total_cost)
 
                 # Apply control based on control mode
-                apply_control(
-                    controller,
-                    mj_model,
-                    mj_data,
-                    u,
-                    control_history,
-                    p_gain_history,
-                    d_gain_history,
-                )
+                ctrl = None
+                if controller.task.control_mode == ControlMode.GENERAL:
+                    # Standard control mode - direct control application
+                    ctrl = u
+                elif controller.task.control_mode == ControlMode.CARTESIAN:
+                    # Cartesian impedance control
+                    ctrl = impedance_control(
+                        mj_model,
+                        mj_data,
+                        u[:3],
+                        u[3:],
+                        controller.task.Kp,
+                        controller.task.Kd,
+                        controller.task.nullspace_stiffness,
+                        controller.task.q_d_nullspace,
+                        controller.task.ee_site_id,
+                    )
+                else:
+                    # Unsupported control mode
+                    raise ValueError(f"Control mode {controller.task.control_mode} not supported")
+
+                # Apply control
+                mj_data.ctrl[:] = np.array(ctrl[: mj_model.nu])
+                control_history.append(np.array(ctrl))
 
                 # Add visualizations if debug info is enabled
                 if show_debug_info:
@@ -208,9 +221,7 @@ def run_interactive(
 
     # Plot history data if requested
     if plot_costs and cost_history:
-        plot_simulation_history(
-            controller, cost_history, p_gain_history, d_gain_history, control_history
-        )
+        plot_simulation_history(controller, cost_history, control_history)
 
     # Save recorded video if enabled
     if record_video and frames:
@@ -265,88 +276,6 @@ def visualize_traces(viewer, controller, rollouts, num_traces, trace_width):
                 viewer.user_scn.ngeom += 1
 
 
-def apply_control(
-    controller, mj_model, mj_data, u, control_history, p_gain_history, d_gain_history
-):
-    """Apply control based on the control mode."""
-    control_mode = controller.task.control_mode
-
-    if control_mode == ControlMode.GENERAL:
-        # Apply control directly
-        mj_data.ctrl[:] = np.array(u)
-        control_history.append(np.array(u))
-
-    elif control_mode == ControlMode.GENERAL_VI:
-        # Extract control and gains
-        ctrl, p_gains, d_gains = controller.task.extract_gains(u)
-
-        # Update actuator gain parameters
-        for j in range(controller.task.nu_ctrl):
-            mj_model.actuator_gainprm[j, 0] = p_gains[j]
-            mj_model.actuator_biasprm[j, 1] = -p_gains[j]
-            mj_model.actuator_biasprm[j, 2] = -d_gains[j]
-
-        # Apply control
-        mj_data.ctrl[: controller.task.nu_ctrl] = np.array(ctrl)
-
-        # Store history
-        control_history.append(np.array(ctrl))
-        p_gain_history.append(np.array(p_gains))
-        d_gain_history.append(np.array(d_gains))
-
-    elif control_mode == ControlMode.CARTESIAN:
-        # Compute impedance control
-        Kp = jnp.diag(
-            jnp.array(
-                [
-                    controller.task.trans_p,
-                    controller.task.trans_p,
-                    controller.task.trans_p,
-                    controller.task.rot_p,
-                    controller.task.rot_p,
-                    controller.task.rot_p,
-                ],
-                dtype=float,
-            )
-        )
-        Kd = 2.0 * jnp.sqrt(Kp)
-        tau = impedance_control(
-            mj_model,
-            mj_data,
-            u[:3],
-            u[3:],
-            Kp,
-            Kd,
-            controller.task.nullspace_stiffness,
-            controller.task.q_d_nullspace,
-            controller.task.ee_site_id,
-        )
-
-        # Apply control
-        mj_data.ctrl[:] = np.array(tau[: mj_model.nu])
-        control_history.append(np.array(u))
-
-    elif control_mode == ControlMode.CARTESIAN_SIMPLE_VI:
-        # Extract control and gains
-        ctrl, p_gains, d_gains = controller.task.extract_gains(u)
-
-        # Apply control
-        tau = impedance_control(
-            mj_model,
-            mj_data,
-            ctrl[:3],
-            ctrl[3:],
-            p_gains * jnp.identity(6),
-            d_gains * jnp.identity(6),
-            0.0,
-            controller.task.q_d_nullspace,
-            controller.task.ee_site_id,
-        )
-
-        mj_data.ctrl[:] = np.array(tau)
-        control_history.append(np.array(ctrl))
-
-
 def add_debug_visualizations(viewer, controller, mj_data, policy_params, total_cost):
     """Add debug visualizations to the scene."""
     # Visualize reference position if available
@@ -399,22 +328,11 @@ def add_debug_visualizations(viewer, controller, mj_data, policy_params, total_c
     viewer.user_scn.ngeom += 1
 
 
-def plot_simulation_history(
-    controller, cost_history, p_gain_history, d_gain_history, control_history
-):
+def plot_simulation_history(controller, cost_history, control_history):
     """Plot simulation history data."""
     try:
-        # Determine number of subplots based on available data
-        optimizing_gains = (
-            controller.task.control_mode != ControlMode.GENERAL
-            and controller.task.control_mode != ControlMode.CARTESIAN
-        )
-        num_subplots = (
-            1 + (2 if optimizing_gains and p_gain_history and d_gain_history else 0) + 1
-        )
-
-        fig, axes = plt.subplots(num_subplots, 1, figsize=(10, 10), sharex=True)
-        axes = [axes] if not isinstance(axes, np.ndarray) else axes
+        # Create simple 2-subplot figure (cost and control)
+        fig, axes = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
 
         # Plot cost history
         axes[0].plot(cost_history)
@@ -422,47 +340,22 @@ def plot_simulation_history(
         axes[0].set_ylabel("Cost")
         axes[0].grid(True)
 
-        # Plot gain histories if available
-        if optimizing_gains and p_gain_history and d_gain_history:
-            p_gains_array = np.array(p_gain_history)
-            d_gains_array = np.array(d_gain_history)
-
-            # P gains
-            for i in range(p_gains_array.shape[1]):
-                axes[1].plot(p_gains_array[:, i], label=f"Actuator {i}")
-            axes[1].set_title("P Gains Over Time")
-            axes[1].set_ylabel("P Gain")
-            axes[1].grid(True)
-            axes[1].legend()
-
-            # D gains
-            for i in range(d_gains_array.shape[1]):
-                axes[2].plot(d_gains_array[:, i], label=f"Actuator {i}")
-            axes[2].set_title("D Gains Over Time")
-            axes[2].set_ylabel("D Gain")
-            axes[2].grid(True)
-            axes[2].legend()
-
-            control_plot_idx = 3
-        else:
-            control_plot_idx = 1
-
         # Plot control history
         if control_history:
             control_array = np.array(control_history)
             for i in range(control_array.shape[1]):
-                axes[control_plot_idx].plot(control_array[:, i], label=f"Control {i}")
-            axes[control_plot_idx].set_title("Control Signals Over Time")
-            axes[control_plot_idx].set_ylabel("Control Value")
-            axes[control_plot_idx].set_xlabel("Control Steps")
-            axes[control_plot_idx].grid(True)
-            axes[control_plot_idx].legend()
+                axes[1].plot(control_array[:, i], label=f"Control {i}")
+            axes[1].set_title("Control Signals Over Time")
+            axes[1].set_ylabel("Control Value")
+            axes[1].set_xlabel("Control Steps")
+            axes[1].grid(True)
+            axes[1].legend()
 
         plt.tight_layout()
-        plt.savefig("recordings/cost_gain_history.png")
+        plt.savefig("recordings/cost_control_history.png")
         plt.show()
         print(
-            "Cost, gain, and control history plotted and saved to 'cost_gain_history.png'"
+            "Cost and control history plotted and saved to 'cost_control_history.png'"
         )
     except ImportError:
         print(

@@ -29,28 +29,6 @@ class Particle3D(Task):
             control_mode=control_mode,
         )
 
-        # Setup config
-        self.config = {
-            # Gain limits for GENERAL_VI mode
-            "p_min": 5.0,
-            "p_max": 30.0,
-            "d_min": 1.0,
-            "d_max": 10.0,
-            # Gain limits for CARTESIAN_SIMPLE_VI mode
-            "trans_p_min": 5.0,
-            "trans_p_max": 30.0,
-            "rot_p_min": 5.0,
-            "rot_p_max": 30.0,
-            # Fixed gains for CARTESIAN mode
-            "trans_p": 300.0,
-            "rot_p": 50.0,
-            # Control limits for CARTESIAN modes
-            "pos_min": [-0.3, -0.3, -0.3],  # x, y, z
-            "pos_max": [0.3, 0.3, 0.3],
-            "rot_min": [-3.14, -3.14, -3.14],  # roll, pitch, yaw
-            "rot_max": [3.14, 3.14, 3.14],
-        }
-
         self.particle_id = mj_model.site("particle").id
         self.reference_id = mj_model.site("reference").id
 

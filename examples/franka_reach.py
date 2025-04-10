@@ -34,27 +34,11 @@ def main():
 
     noise_level = None
     initial_control = None
-    if control_mode == ControlMode.GENERAL_VI:
-        print("Running general VI")
-        noise_level = np.array([0.01] * 6 + [1] * 12)
-        initial_control = jnp.tile(
-            jnp.array([0.5, 0.0, 0.4, -3.14, 0.0, 0.0, 300, 50]),
-            (task.planning_horizon, 1),
-        )
-    elif control_mode == ControlMode.CARTESIAN_SIMPLE_VI:
-        print("Running cartesian simple VI")
-        noise_level = np.array([0.01] * 6 + [1] * 2)
-        initial_control = jnp.tile(
-            jnp.array([0.5, 0.0, 0.4, -3.14, 0.0, 0.0, 300, 50]),
-            (task.planning_horizon, 1),
-        )
-    else:
-        print("Running general")
-        noise_level = np.array([0.01] * 6)
-        initial_control = jnp.tile(
-            jnp.array([0.5, 0.0, 0.4, -3.14, 0.0, 0.0]),
-            (task.planning_horizon, 1),
-        )
+    noise_level = np.array([0.05] * 6)
+    initial_control = jnp.tile(
+        jnp.array([0.5, 0.0, 0.4, -3.14, 0.0, 0.0]),
+        (task.planning_horizon, 1),
+    )
     # Set the controller based on command-line arguments
     if args.algorithm == "ps" or args.algorithm is None:
         print("Running predictive sampling")

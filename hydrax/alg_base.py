@@ -172,7 +172,36 @@ class SamplingBasedController(ABC):
             x = mjx.forward(model, x)  # compute site positions
 
             # Apply control based on control mode
-            cost, sites, x = self._apply_control_and_advance(model, x, u)
+            control = None
+            if self.task.control_mode == ControlMode.GENERAL:
+                # Standard control mode - direct control application
+                control = u
+            elif self.task.control_mode == ControlMode.CARTESIAN:
+                # Cartesian impedance control
+                control = impedance_control_mjx(
+                    model_mjx=model,
+                    data_mjx=x,
+                    p_des=u[:3],
+                    eul_des=u[3:],
+                    Kp=self.task.Kp,
+                    Kd=self.task.Kd,
+                    nullspace_stiffness=self.task.nullspace_stiffness,
+                    q_d_nullspace=self.task.q_d_nullspace,
+                    site_id=self.task.ee_site_id,
+                )
+            else:
+                # Unsupported control mode
+                raise ValueError(f"Control mode {self.task.control_mode} not supported")
+
+            cost = self.task.dt * self.task.running_cost(x, u)
+            sites = self.task.get_trace_sites(x)
+            # Advance state
+            x = jax.lax.fori_loop(
+                0,
+                self.task.sim_steps_per_control_step,
+                lambda _, x: mjx.step(model, x),
+                x.replace(ctrl=control),
+            )
 
             return x, (x, cost, sites)
 
@@ -192,154 +221,6 @@ class SamplingBasedController(ABC):
             controls=controls,
             costs=costs,
             trace_sites=trace_sites,
-        )
-
-    def _apply_control_and_advance(
-        self, model: mjx.Model, x: mjx.Data, u: jax.Array
-    ) -> Tuple[jax.Array, jax.Array, mjx.Data]:
-        """Apply control based on control mode and advance simulation.
-
-        Args:
-            model: The MuJoCo model.
-            x: Current state.
-            u: Control input.
-
-        Returns:
-            cost: Cost for this step.
-            sites: Trace site positions.
-            x: Advanced state.
-        """
-        control_mode = self.task.control_mode
-
-        if control_mode == ControlMode.GENERAL:
-            # Standard control mode - direct control application
-            cost = self.task.dt * self.task.running_cost(x, u)
-            sites = self.task.get_trace_sites(x)
-
-            # Advance state
-            x = jax.lax.fori_loop(
-                0,
-                self.task.sim_steps_per_control_step,
-                lambda _, x: mjx.step(model, x),
-                x.replace(ctrl=u),
-            )
-
-        elif control_mode == ControlMode.GENERAL_VI:
-            # Variable impedance control mode
-            ctrl, p_gains, d_gains = self.task.extract_gains(u)
-
-            # Update model with gains
-            updated_model = self._update_model_gains(model, p_gains, d_gains)
-
-            cost = self.task.dt * self.task.running_cost(x, u)
-            sites = self.task.get_trace_sites(x)
-
-            # Advance state with updated model
-            x = jax.lax.fori_loop(
-                0,
-                self.task.sim_steps_per_control_step,
-                lambda _, x: mjx.step(updated_model, x),
-                x.replace(ctrl=ctrl),
-            )
-
-        elif control_mode == ControlMode.CARTESIAN:
-            # Cartesian impedance control with fixed gains
-            Kp = jnp.diag(
-                jnp.array(
-                    [
-                        self.task.trans_p,
-                        self.task.trans_p,
-                        self.task.trans_p,
-                        self.task.rot_p,
-                        self.task.rot_p,
-                        self.task.rot_p,
-                    ],
-                    dtype=float,
-                )
-            )
-            Kd = 2.0 * jnp.sqrt(Kp)
-            tau = impedance_control_mjx(
-                model,
-                x,
-                u[:3],
-                u[3:],
-                Kp,
-                Kd,
-                self.task.nullspace_stiffness,
-                self.task.q_d_nullspace,
-                self.task.ee_site_id,
-            )
-
-            cost = self.task.dt * self.task.running_cost(x, u)
-            sites = self.task.get_trace_sites(x)
-
-            # Advance state
-            x = jax.lax.fori_loop(
-                0,
-                self.task.sim_steps_per_control_step,
-                lambda _, x: mjx.step(model, x),
-                x.replace(ctrl=tau[: model.nu]),
-            )
-
-        elif control_mode in [
-            ControlMode.CARTESIAN_VI,
-            ControlMode.CARTESIAN_SIMPLE_VI,
-        ]:
-            # Cartesian variable impedance control
-            ctrl, p_gain, d_gain = self.task.extract_gains(u)
-            tau = impedance_control_mjx(
-                model,
-                x,
-                ctrl[:3],
-                ctrl[3:],
-                jnp.diag(p_gain),
-                jnp.diag(d_gain),
-                self.task.nullspace_stiffness,
-                self.task.q_d_nullspace,
-                self.task.ee_site_id,
-            )
-
-            cost = self.task.dt * self.task.running_cost(x, u)
-            sites = self.task.get_trace_sites(x)
-
-            # Advance state
-            x = jax.lax.fori_loop(
-                0,
-                self.task.sim_steps_per_control_step,
-                lambda _, x: mjx.step(model, x),
-                x.replace(ctrl=tau),
-            )
-
-        else:
-            # Unsupported control mode
-            raise ValueError(f"Control mode {control_mode} not supported")
-
-        return cost, sites, x
-
-    def _update_model_gains(
-        self, model: mjx.Model, p_gains: jax.Array, d_gains: jax.Array
-    ) -> mjx.Model:
-        """Update model with new gains for variable impedance control.
-
-        Args:
-            model: The MuJoCo model to update.
-            p_gains: Position gains.
-            d_gains: Damping gains.
-
-        Returns:
-            Updated model with new gains.
-        """
-        updated_gainprm = model.actuator_gainprm.at[: self.task.nu_ctrl, 0].set(p_gains)
-
-        updated_biasprm = (
-            model.actuator_biasprm.at[: self.task.nu_ctrl, 1]
-            .set(-p_gains)
-            .at[: self.task.nu_ctrl, 2]
-            .set(-d_gains)
-        )
-
-        return model.replace(
-            actuator_gainprm=updated_gainprm, actuator_biasprm=updated_biasprm
         )
 
     # Abstract methods to be implemented by subclasses
