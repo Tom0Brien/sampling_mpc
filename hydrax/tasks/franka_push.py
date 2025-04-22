@@ -6,8 +6,8 @@ import mujoco
 from mujoco import mjx
 
 from hydrax import ROOT
-from hydrax.task_base import Task, ControlMode
-from hydrax.util import mat_to_quat, eul_to_quat, orientation_error, mat_to_rpy
+from hydrax.task_base import Task
+from hydrax.utils.math import mat_to_quat, eul_to_quat, orientation_error, mat_to_rpy
 
 
 class FrankaPush(Task):
@@ -15,29 +15,15 @@ class FrankaPush(Task):
 
     def __init__(
         self,
-        planning_horizon: int = 10,
-        sim_steps_per_control_step: int = 5,
-        control_mode: ControlMode = ControlMode.GENERAL,
     ):
-        """Load the MuJoCo model and set task parameters.
-
-        Args:
-            planning_horizon: The number of control steps (T) to plan over.
-            sim_steps_per_control_step: The number of simulation steps per control step.
-            control_mode: The control mode to use.
-                          CARTESIAN_SIMPLE_VI is recommended for Franka as it optimizes
-                          only translational and rotational p-gains with d-gains automatically set.
-        """
+        """Load the MuJoCo model and set task parameters."""
         mj_model = mujoco.MjModel.from_xml_path(
             ROOT + "/models/franka_emika_panda/mjx_scene_box_push.xml"
         )
 
         super().__init__(
             mj_model,
-            planning_horizon=planning_horizon,
-            sim_steps_per_control_step=sim_steps_per_control_step,
             trace_sites=["gripper"],
-            control_mode=control_mode,
         )
 
         # Cartesian control gains defaults

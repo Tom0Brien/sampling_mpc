@@ -1,11 +1,11 @@
-from typing import Any, Tuple
+from typing import Any, Literal, Tuple
 
 import evosax
 import jax
 import jax.numpy as jnp
 from flax.struct import dataclass
 
-from hydrax.alg_base import SamplingBasedController, Trajectory
+from hydrax.alg_base import SamplingBasedController, SamplingParams, Trajectory
 from hydrax.risk import RiskStrategy
 from hydrax.task_base import Task
 
@@ -15,18 +15,17 @@ EvoState = Any
 
 
 @dataclass
-class EvosaxParams:
+class EvosaxParams(SamplingParams):
     """Policy parameters for evosax optimizers.
 
     Attributes:
-        mean: The latest control sequence, U = [u₀, u₁, ..., ].
-        opt_state: The state of the evosax optimizer (covariance, etc.).
+        tk: The knot times of the control spline.
+        mean: The mean of the control spline knot distribution, μ = [u₀, ...].
         rng: The pseudo-random number generator key.
+        opt_state: The state of the evosax optimizer (covariance, etc.).
     """
 
-    mean: jax.Array
     opt_state: EvoState
-    rng: jax.Array
 
 
 class Evosax(SamplingBasedController):
@@ -45,8 +44,11 @@ class Evosax(SamplingBasedController):
         num_randomizations: int = 1,
         risk_strategy: RiskStrategy = None,
         seed: int = 0,
+        plan_horizon: float = 1.0,
+        spline_type: Literal["zero", "linear", "cubic"] = "zero",
+        num_knots: int = 4,
         **kwargs,
-    ):
+    ) -> None:
         """Initialize the controller.
 
         Args:
@@ -58,13 +60,25 @@ class Evosax(SamplingBasedController):
             risk_strategy: How to combining costs from different randomizations.
                            Defaults to average cost.
             seed: The random seed for domain randomization.
+            plan_horizon: The time horizon for the rollout in seconds.
+            spline_type: The type of spline used for control interpolation.
+                         Defaults to "zero" (zero-order hold).
+            num_knots: The number of knots in the control spline.
             **kwargs: Additional keyword arguments for the optimizer.
         """
-        super().__init__(task, num_randomizations, risk_strategy, seed)
+        super().__init__(
+            task,
+            num_randomizations=num_randomizations,
+            risk_strategy=risk_strategy,
+            seed=seed,
+            plan_horizon=plan_horizon,
+            spline_type=spline_type,
+            num_knots=num_knots,
+        )
 
         self.strategy = optimizer(
             popsize=num_samples,
-            num_dims=task.nu_total * task.planning_horizon,
+            num_dims=task.model.nu * self.num_knots,
             **kwargs,
         )
 
@@ -72,31 +86,28 @@ class Evosax(SamplingBasedController):
             es_params = self.strategy.default_params
         self.es_params = es_params
 
-    def init_params(
-        self, initial_control: jax.Array = None, seed: int = 0
-    ) -> EvosaxParams:
+    def init_params(self, initial_control=None, seed: int = 0) -> EvosaxParams:
         """Initialize the policy parameters."""
-        rng = jax.random.key(seed)
-        rng, init_rng = jax.random.split(rng)
-        controls = jnp.zeros((self.task.planning_horizon, self.task.nu_total))
-        if initial_control is not None:
-            controls = initial_control
+        _params = super().init_params(initial_control, seed)
+        rng, init_rng = jax.random.split(_params.rng)
         opt_state = self.strategy.initialize(init_rng, self.es_params)
-        return EvosaxParams(mean=controls, opt_state=opt_state, rng=rng)
+        return EvosaxParams(
+            tk=_params.tk, mean=_params.mean, opt_state=opt_state, rng=rng
+        )
 
-    def sample_controls(self, params: EvosaxParams) -> Tuple[jax.Array, EvosaxParams]:
+    def sample_knots(self, params: EvosaxParams) -> Tuple[jax.Array, EvosaxParams]:
         """Sample control sequences from the proposal distribution."""
         rng, sample_rng = jax.random.split(params.rng)
         x, opt_state = self.strategy.ask(sample_rng, params.opt_state, self.es_params)
 
         # evosax works with vectors of decision variables, so we reshape U to
-        # [batch_size, horizon, nu].
+        # [batch_size, num_knots, nu].
         controls = jnp.reshape(
             x,
             (
                 self.strategy.popsize,
-                self.task.planning_horizon,
-                self.task.nu_total,
+                self.num_knots,
+                self.task.model.nu,
             ),
         )
 
@@ -105,11 +116,11 @@ class Evosax(SamplingBasedController):
     def update_params(self, params: EvosaxParams, rollouts: Trajectory) -> EvosaxParams:
         """Update the policy parameters based on the rollouts."""
         costs = jnp.sum(rollouts.costs, axis=1)  # sum over time steps
-        x = jnp.reshape(rollouts.controls, (self.strategy.popsize, -1))
+        x = jnp.reshape(rollouts.knots, (self.strategy.popsize, -1))
         opt_state = self.strategy.tell(x, costs, params.opt_state, self.es_params)
 
         best_idx = jnp.argmin(costs)
-        best_controls = rollouts.controls[best_idx]
+        best_knots = rollouts.knots[best_idx]
 
         # By default, opt_state stores the best member ever, rather than the
         # best member from the current generation. We want to just use the best
@@ -118,11 +129,4 @@ class Evosax(SamplingBasedController):
         opt_state = opt_state.replace(
             best_member=x[best_idx], best_fitness=costs[best_idx]
         )
-
-        return params.replace(mean=best_controls, opt_state=opt_state)
-
-    def get_action(self, params: EvosaxParams, t: float) -> jax.Array:
-        """Get the control action for the current time step, zero order hold."""
-        idx_float = (t + self.task.dt) / self.task.dt  # zero order hold
-        idx = jnp.floor(idx_float).astype(jnp.int32)
-        return params.mean[idx]
+        return params.replace(mean=best_knots, opt_state=opt_state)

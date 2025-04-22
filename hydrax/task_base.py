@@ -1,20 +1,10 @@
-from enum import Enum, auto
 from abc import ABC, abstractmethod
-from typing import Dict, Sequence, Tuple, Optional, Any
+from typing import Dict, Sequence
 
 import jax
 import jax.numpy as jnp
 import mujoco
 from mujoco import mjx
-
-
-class ControlMode(Enum):
-    """Enumeration of control modes."""
-
-    # Controls are based on mujoco model
-    GENERAL = auto()
-    # Cartesian impedance control, assumes model has torque actuators and single end-effector
-    CARTESIAN = auto()
 
 
 class Task(ABC):
@@ -32,62 +22,38 @@ class Task(ABC):
     def __init__(
         self,
         mj_model: mujoco.MjModel,
-        planning_horizon: int,
-        sim_steps_per_control_step: int,
-        trace_sites: Sequence[str] = [],
-        control_mode: ControlMode = ControlMode.GENERAL,
-    ):
+        trace_sites: Sequence[str] | None = None,
+    ) -> None:
         """Set the model and simulation parameters.
 
         Args:
             mj_model: The MuJoCo model to use for simulation.
-            planning_horizon: The number of control steps (T) to plan over.
-            sim_steps_per_control_step: The number of simulation steps to take
-                                        for each control step.
             trace_sites: A list of site names to visualize with traces.
-            control_mode: The control mode to use.
+
+        Note: many other simulator parameters, e.g., simulator time step,
+              Newton iterations, etc., are set in the model itself.
         """
         assert isinstance(mj_model, mujoco.MjModel)
         self.mj_model = mj_model
         self.model = mjx.put_model(mj_model)
-        self.planning_horizon = planning_horizon
-        self.sim_steps_per_control_step = sim_steps_per_control_step
-        self.control_mode = control_mode
 
-        # For cartesian control modes, set default end-effector site ID
-        # This should be overridden by subclasses
-        self.ee_site_id = 0
+        # Set actuator limits
+        self.u_min = jnp.where(
+            mj_model.actuator_ctrllimited,
+            mj_model.actuator_ctrlrange[:, 0],
+            -jnp.inf,
+        )
+        self.u_max = jnp.where(
+            mj_model.actuator_ctrllimited,
+            mj_model.actuator_ctrlrange[:, 1],
+            jnp.inf,
+        )
 
-        # Cartesian control gains defaults
-        self.Kp = jnp.diag(jnp.array([300.0, 300.0, 300.0, 50.0, 50.0, 50.0]))
-        self.Kd = 2.0 * jnp.sqrt(self.Kp)
-        self.nullspace_stiffness = 10.0
-        self.q_d_nullspace = jnp.zeros(mj_model.nv)
-
-        # Configure control dimensions and limits based on control mode
-        if self.control_mode == ControlMode.GENERAL:
-            self.nu_ctrl = self.mj_model.nu
-            self.nu_total = self.mj_model.nu
-            self.u_min = jnp.where(
-                self.mj_model.actuator_ctrllimited,
-                self.mj_model.actuator_ctrlrange[:, 0],
-                -jnp.inf,
-            )
-            self.u_max = jnp.where(
-                self.mj_model.actuator_ctrllimited,
-                self.mj_model.actuator_ctrlrange[:, 1],
-                jnp.inf,
-            )
-        elif self.control_mode == ControlMode.CARTESIAN:
-            self.nu_ctrl = 6  # 3D position and orientation of end-effector
-            self.nu_total = 6
-        else:
-            raise ValueError(f"Invalid control mode: {self.control_mode}")
-
-        # Timestep for each control step
-        self.dt = mj_model.opt.timestep * sim_steps_per_control_step
+        # Simulation timestep
+        self.dt = mj_model.opt.timestep
 
         # Get site IDs for points we want to trace
+        trace_sites = trace_sites or []
         self.trace_site_ids = jnp.array(
             [mj_model.site(name).id for name in trace_sites]
         )
@@ -168,22 +134,3 @@ class Task(ABC):
             A dictionary of randomized data elements.
         """
         return {}
-
-    def extract_gains(
-        self, control: jax.Array
-    ) -> Tuple[jax.Array, jax.Array, jax.Array]:
-        """Extract control and gain components from the extended control vector.
-
-        Args:
-            control: The extended control vector based on the control mode
-
-        Returns:
-            Tuple of (control_actions, p_gains, d_gains)
-        """
-        if (
-            self.control_mode == ControlMode.GENERAL
-            or self.control_mode == ControlMode.CARTESIAN
-        ):
-            return control, None, None
-        else:
-            raise ValueError(f"Invalid control mode: {self.control_mode}")

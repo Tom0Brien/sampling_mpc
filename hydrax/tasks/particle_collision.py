@@ -6,7 +6,7 @@ import mujoco
 from mujoco import mjx
 
 from hydrax import ROOT
-from hydrax.task_base import Task, ControlMode
+from hydrax.task_base import Task
 
 
 class ParticleCollision(Task):
@@ -14,9 +14,6 @@ class ParticleCollision(Task):
 
     def __init__(
         self,
-        planning_horizon: int = 5,
-        sim_steps_per_control_step: int = 5,
-        control_mode: ControlMode = ControlMode.GENERAL,
     ):
         """Load the MuJoCo model and set task parameters."""
         mj_model = mujoco.MjModel.from_xml_path(
@@ -25,29 +22,8 @@ class ParticleCollision(Task):
 
         super().__init__(
             mj_model,
-            planning_horizon=planning_horizon,
-            sim_steps_per_control_step=sim_steps_per_control_step,
             trace_sites=["particle"],
-            control_mode=control_mode,
         )
-
-        # Setup config (reusing relevant parts from Particle3D)
-        self.config = {
-            "p_min": 5.0,
-            "p_max": 30.0,
-            "d_min": 1.0,
-            "d_max": 10.0,
-            "trans_p_min": 5.0,
-            "trans_p_max": 30.0,
-            "rot_p_min": 5.0,
-            "rot_p_max": 30.0,
-            "trans_p": 300.0,
-            "rot_p": 50.0,
-            "pos_min": [-0.3, -0.3, -0.3],
-            "pos_max": [0.3, 0.3, 0.3],
-            "rot_min": [-3.14, -3.14, -3.14],
-            "rot_max": [3.14, 3.14, 3.14],
-        }
 
         self.particle_id = mj_model.site("particle").id
         self.reference_id = mj_model.site("reference").id

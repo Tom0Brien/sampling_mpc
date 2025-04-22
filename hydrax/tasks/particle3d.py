@@ -6,27 +6,19 @@ import mujoco
 from mujoco import mjx
 
 from hydrax import ROOT
-from hydrax.task_base import Task, ControlMode
+from hydrax.task_base import Task
 
 
 class Particle3D(Task):
     """A velocity-controlled 3D point mass that chases a target position."""
 
-    def __init__(
-        self,
-        planning_horizon: int = 5,
-        sim_steps_per_control_step: int = 5,
-        control_mode: ControlMode = ControlMode.GENERAL,
-    ):
+    def __init__(self):
         """Load the MuJoCo model and set task parameters."""
         mj_model = mujoco.MjModel.from_xml_path(ROOT + "/models/particle3d/scene.xml")
 
         super().__init__(
             mj_model,
-            planning_horizon=planning_horizon,
-            sim_steps_per_control_step=sim_steps_per_control_step,
             trace_sites=["particle"],
-            control_mode=control_mode,
         )
 
         self.particle_id = mj_model.site("particle").id
@@ -65,4 +57,5 @@ class Particle3D(Task):
     ) -> Dict[str, jax.Array]:
         """Randomly shift the measured particle position."""
         shift = jax.random.uniform(rng, (3,), minval=-0.01, maxval=0.01)
+        shift = jnp.concatenate([shift, jnp.zeros(4)])
         return {"qpos": data.qpos + shift}

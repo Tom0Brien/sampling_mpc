@@ -7,16 +7,11 @@
   </option>
 
   <default>
-    <joint type="hinge" axis="0 0 1" limited="true" range="-.29 .29" damping="0" />
+    <joint type="hinge" axis="0 0 1" limited="true" range="-.29 .29" damping="1" />
     <motor gear=".1" ctrlrange="-1 1" ctrllimited="true" />
-    <default class="translation">
-      <position kp="5" kv="3" ctrlrange="-0.3 0.3"/>
-    </default>
   </default>
 
   <worldbody>
-    <site name="reference" pos="0 0 0.01" size="0.01" rgba="0 0 0 0.0"/>
-    
     <body name="goal" mocap="true" pos="0.25 0 0.01" quat="1 0 0 0">
       <geom type="sphere" size=".01" contype="0" conaffinity="0" rgba="0 1 0 .5" />
     </body>
@@ -31,12 +26,12 @@
       <joint name="root_x" type="slide" pos="0 0 0" axis="1 0 0" />
       <joint name="root_y" type="slide" pos="0 0 0" axis="0 1 0" />
       <geom name="pointmass" type="sphere" size=".01" mass=".3" />
-      <site name="particle" pos="0 0 0" size="0.01" />
+      <site name="pointmass" pos="0 0 0" size="0.01" />
     </body>
   </worldbody>
 
   <actuator>
-    <position name="x" site="particle" refsite="reference" gear="1 0 0 0 0 0" class="translation"/>
-    <position name="y" site="particle" refsite="reference" gear="0 1 0 0 0 0" class="translation"/>
+    <motor name="x_motor" joint="root_x" gear="1" ctrllimited="true" ctrlrange="-1 1" />
+    <motor name="y_motor" joint="root_y" gear="1" ctrllimited="true" ctrlrange="-1 1" />
   </actuator>
 </mujoco>

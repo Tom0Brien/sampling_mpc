@@ -6,8 +6,8 @@ import mujoco
 from mujoco import mjx
 
 from hydrax import ROOT
-from hydrax.task_base import Task, ControlMode
-from hydrax.util import mat_to_quat, orientation_error
+from hydrax.task_base import Task
+from hydrax.utils.math import mat_to_quat, orientation_error
 
 
 class PushBox(Task):
@@ -15,9 +15,6 @@ class PushBox(Task):
 
     def __init__(
         self,
-        planning_horizon: int = 10,
-        sim_steps_per_control_step: int = 5,
-        control_mode: ControlMode = ControlMode.GENERAL,
     ):
         """Load the MuJoCo model and set task parameters.
 
@@ -30,10 +27,7 @@ class PushBox(Task):
 
         super().__init__(
             mj_model,
-            planning_horizon=planning_horizon,
-            sim_steps_per_control_step=sim_steps_per_control_step,
             trace_sites=["pusher"],
-            control_mode=control_mode,
         )
 
         # Get sensor ids

@@ -7,14 +7,17 @@ import jax
 import jax.numpy as jnp
 import mujoco
 from mujoco import mjx
+import mujoco.viewer
 from scipy.spatial.transform import Rotation
 from matplotlib import pyplot as plt
 
 
-from hydrax.algs import MPPI, PredictiveSampling
-from hydrax.tasks.franka_reach import FrankaReach
-from hydrax.task_base import ControlMode
-from parse_args import control_mode_map
+from hydrax.algs import MPPI, PredictiveSampling, CEM
+from hydrax import ROOT
+from hydrax.tasks.particle3d import Particle3D
+
+# from hydrax.tasks.particle_collision import ParticleCollision
+# from hydrax.tasks.franka_reach import FrankaReach
 
 """
 Control loop for Franka robot using ROS for communication and Hydrax for control.
@@ -24,9 +27,7 @@ actions using a sampling-based controller, and sends commands to the robot.
 
 
 class FrankaRosControl:
-    def __init__(
-        self, host="localhost", port=9090, controller_type="ps", control_mode="general"
-    ):
+    def __init__(self, host="localhost", port=9090, controller_type="ps"):
         # ROS connection
         self.client = roslibpy.Ros(host=host, port=port)
         self.client.run()
@@ -35,6 +36,12 @@ class FrankaRosControl:
         # Setup subscribers for robot state
         self.joint_state_sub = roslibpy.Topic(
             self.client, "/joint_states", "sensor_msgs/JointState"
+        )
+
+        self.franka_state_sub = roslibpy.Topic(
+            self.client,
+            "/franka_state_controller/franka_states",
+            "franka_msgs/FrankaState",
         )
 
         # Setup publisher for cartesian pose commands
@@ -61,49 +68,56 @@ class FrankaRosControl:
         self.current_joint_velocities = None
         self.current_end_effector_pose = None
 
-        # Map control_mode string to ControlMode enum
-        control_mode_enum = control_mode_map[control_mode]
-
         # Initialize the Hydrax task and controller
-        self.task = FrankaReach(control_mode=control_mode_enum)
+        self.task = Particle3D()
+        # self.task = ParticleCollision(control_mode=control_mode_enum)
         self.mj_model = self.task.mj_model
         self.mj_data = mujoco.MjData(self.mj_model)
         self.mjx_data = mjx.put_data(self.mj_model, self.mj_data)
 
-        # Set the initial joint positions
-        self.mj_data.qpos[:7] = [-0.196, -0.189, 0.182, -2.1, 0.0378, 1.91, 0.756]
+        # Add a franka model
+        self.franka_model = mujoco.MjModel.from_xml_path(
+            ROOT + "/models/franka_emika_panda/mjx_panda_cartesian.xml"
+        )
+        self.franka_data = mujoco.MjData(self.franka_model)
+        # Set the initial joint positions - not needed for particle task
+        # self.mj_data.qpos[:7] = [-0.196, -0.189, 0.182, -2.1, 0.0378, 1.91, 0.756]
 
         # Set up the controller based on type
         if controller_type == "ps":
             print("Using Predictive Sampling controller")
             self.controller = PredictiveSampling(
                 self.task,
-                num_samples=128,
-                noise_level=0.01,
+                num_samples=16,
+                noise_level=0.1,
+                plan_horizon=0.25,
+                spline_type="zero",
+                num_knots=11,
             )
         elif controller_type == "mppi":
             print("Using MPPI controller")
-            if (
-                control_mode_enum == ControlMode.GENERAL
-                or control_mode_enum == ControlMode.CARTESIAN
-            ):
-                self.controller = MPPI(
-                    self.task,
-                    num_samples=2000,
-                    noise_level=0.01,
-                    temperature=0.001,
-                )
-            elif control_mode_enum == ControlMode.CARTESIAN_SIMPLE_VI:
-                self.controller = MPPI(
-                    self.task,
-                    num_samples=2000,
-                    noise_level=np.array(
-                        [0.01] * 6 + [1] + [1]
-                    ),  # 6 pose + 2 gain params
-                    temperature=0.001,
-                )
-            else:
-                raise ValueError(f"Unsupported controller mode: {control_mode_enum}")
+            self.controller = MPPI(
+                self.task,
+                num_samples=2000,
+                noise_level=0.1,
+                plan_horizon=0.25,
+                spline_type="zero",
+                num_knots=11,
+            )
+        elif controller_type == "cem":
+            print("Running CEM")
+            self.controller = CEM(
+                self.task,
+                num_samples=512,
+                num_elites=20,
+                sigma_start=0.025,
+                sigma_min=0.005,
+                explore_fraction=0.5,
+                plan_horizon=0.25,
+                spline_type="zero",
+                num_knots=11,
+            )
+
         else:
             raise ValueError(f"Unsupported controller type: {controller_type}")
 
@@ -112,43 +126,19 @@ class FrankaRosControl:
         self.get_action = jax.jit(self.controller.get_action)
 
         # Initial conditions
-        initial_control = None
         self.translational_stiffness = 200.0  # N/m
         self.rotational_stiffness = 10.0  # Nm/rad
         self.nullspace_stiffness = 1.0
-        if (
-            control_mode_enum == ControlMode.CARTESIAN
-            or control_mode_enum == ControlMode.GENERAL
-        ):
-            initial_control = jnp.tile(
-                jnp.array(
-                    [
-                        0.5,  # x reference
-                        0.0,  # y reference
-                        0.4,  # z reference
-                        -3.14,  # roll reference
-                        0.0,  # pitch reference
-                        0.0,  # yaw reference
-                    ]
-                ),
-                (self.task.planning_horizon, 1),
-            )
-        elif control_mode_enum == ControlMode.CARTESIAN_SIMPLE_VI:
-            initial_control = jnp.tile(
-                jnp.array(
-                    [
-                        0.5,
-                        0.0,
-                        0.4,
-                        -3.14,
-                        0.0,
-                        0.0,
-                        self.translational_stiffness,
-                        self.rotational_stiffness,
-                    ]
-                ),
-                (self.task.planning_horizon, 1),
-            )
+        initial_control = jnp.tile(
+            jnp.array(
+                [
+                    0.5,  # x reference
+                    0.0,  # y reference
+                    0.5,  # z reference
+                ]
+            ),
+            (self.controller.num_knots, 1),
+        )
 
         # Send initial compliance parameters
         self.update_compliance_params(
@@ -162,14 +152,21 @@ class FrankaRosControl:
             initial_control=initial_control
         )
 
-        # Set up joint state callback
+        # Set up joint and franka state callbacks
+        self.ee_position = np.zeros(3)
+        self.ee_velocity = np.zeros(6)
         self.joint_state_sub.subscribe(self.joint_state_callback)
+        self.franka_state_sub.subscribe(self.franka_state_callback)
 
         # Wait for first joint state message
         print("Waiting for joint state messages...")
         while self.current_joint_positions is None:
             time.sleep(0.1)
         print("Received initial joint state")
+        self.update_controller_state()
+
+        # Calculate control frequency parameters will be done in run_control_loop
+        # since that's where we receive the requested frequency
 
     def joint_state_callback(self, message):
         """Callback for joint state messages"""
@@ -177,17 +174,40 @@ class FrankaRosControl:
         self.current_joint_positions = np.array(message["position"])
         self.current_joint_velocities = np.array(message["velocity"])
 
+    def franka_state_callback(self, message):
+        """Callback for franka state messages"""
+        # Extract franka state
+        q = np.concatenate([np.array(message["q"]), np.zeros(2)])
+        dq = np.concatenate([np.array(message["dq"]), np.zeros(2)])
+
+        # Update franka model with latest joint positions and velocities
+        self.franka_data.qpos = q
+        self.franka_data.qvel = dq
+        mujoco.mj_forward(self.franka_model, self.franka_data)
+
+        # Get franka jacobian and compute ee velocity
+        gripper_site_id = self.franka_model.site("gripper").id
+        self.ee_position = self.franka_data.site_xpos[gripper_site_id]
+        J = np.zeros((6, self.franka_model.nv))
+        mujoco.mj_jacSite(
+            self.franka_model, self.franka_data, J[:3, :], J[3:, :], gripper_site_id
+        )
+        self.ee_velocity = J @ dq
+
     def update_controller_state(self):
         """Update the controller's state with latest robot state"""
-
-        # Update the state in mjx_data (need to map joint states to qpos/qvel)
+        # For particle task, we only need position and velocity
+        qpos = self.mj_data.qpos
+        qvel = self.mj_data.qvel
+        qpos[:3] = self.ee_position
+        qvel = self.ee_velocity
         self.mjx_data = self.mjx_data.replace(
-            qpos=jnp.array(self.current_joint_positions),
-            qvel=jnp.array(self.current_joint_velocities),
+            qpos=qpos,
+            qvel=qvel,
         )
         # Store a CPU version of the state for visualization and transforms
-        self.mj_data.qpos = np.array(self.current_joint_positions)
-        self.mj_data.qvel = np.array(self.current_joint_velocities)
+        self.mj_data.qpos = qpos
+        self.mj_data.qvel = qvel
         mujoco.mj_forward(self.mj_model, self.mj_data)
 
     def update_compliance_params(
@@ -236,13 +256,13 @@ class FrankaRosControl:
         else:
             print("Failed to update compliance parameters:", result)
 
-    def send_cartesian_command(self, pose):
+    def send_cartesian_command(self, position):
         """
         Send a cartesian pose command to the robot
-        pose: [x, y, z, roll, pitch, yaw]
+        position: [x, y, z]
         """
-        # Convert pose rpy to quaternion
-        quat = Rotation.from_euler("xyz", pose[3:6]).as_quat()
+        # Fixed orientation
+        quat = Rotation.from_euler("xyz", [-3.14, 0.0, 0.0]).as_quat()
 
         # Create pose message
         pose_msg = {
@@ -255,9 +275,9 @@ class FrankaRosControl:
             },
             "pose": {
                 "position": {
-                    "x": float(pose[0]),
-                    "y": float(pose[1]),
-                    "z": float(pose[2]),
+                    "x": float(position[0]),
+                    "y": float(position[1]),
+                    "z": float(position[2]),
                 },
                 "orientation": {
                     "x": float(quat[0]),
@@ -277,12 +297,10 @@ class FrankaRosControl:
             return
 
         num_trace_sites = len(self.controller.task.trace_site_ids)
-        num_traces = min(self.controller.task.planning_horizon, max_traces)
+        num_traces = min(self.controller.num_knots, max_traces)
         trace_color = [1.0, 1.0, 1.0, 0.1]
 
-        for i in range(
-            num_trace_sites * num_traces * self.controller.task.planning_horizon
-        ):
+        for i in range(num_trace_sites * num_traces * self.controller.num_knots):
             mujoco.mjv_initGeom(
                 viewer.user_scn.geoms[i],
                 type=mujoco.mjtGeom.mjGEOM_LINE,
@@ -304,7 +322,7 @@ class FrankaRosControl:
         ii = 0
         for k in range(num_trace_sites):
             for i in range(num_traces):
-                for j in range(self.controller.task.planning_horizon):
+                for j in range(self.controller.num_knots):
                     mujoco.mjv_connector(
                         viewer.user_scn.geoms[ii],
                         mujoco.mjtGeom.mjGEOM_LINE,
@@ -333,7 +351,7 @@ class FrankaRosControl:
     def _visualize_desired_pose(self, viewer):
         """Visualize the desired poses with red spheres"""
         # Add sphere for desired pose
-        for i in range(self.task.planning_horizon):
+        for i in range(self.controller.num_knots):
             geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
             mujoco.mjv_initGeom(
                 geom,
@@ -357,15 +375,11 @@ class FrankaRosControl:
             geom.label = f"{i}"
             viewer.user_scn.ngeom += 1
 
-    def _plot_histories(
-        self, cost_history, p_gain_history, d_gain_history, control_history
-    ):
+    def _plot_histories(self, cost_history, control_history):
         """Plot and save control histories
 
         Args:
             cost_history (list): History of cost values
-            p_gain_history (list): History of P gains (optional)
-            d_gain_history (list): History of D gains (optional)
             control_history (list): History of control signals
         """
         if not cost_history or len(cost_history) <= 1:
@@ -373,10 +387,7 @@ class FrankaRosControl:
 
         try:
             # Determine number of subplots needed
-            num_subplots = 1  # Always have cost plot
-            if self.task.control_mode == ControlMode.CARTESIAN_SIMPLE_VI:
-                num_subplots += 2  # Add P and D gain plots
-            num_subplots += 1  # Add control signals plot
+            num_subplots = 2  # Just cost plot and control signals plot
 
             # Create figure
             fig, axes = plt.subplots(num_subplots, 1, figsize=(10, 10), sharex=True)
@@ -388,44 +399,16 @@ class FrankaRosControl:
             axes[0].set_ylabel("Cost")
             axes[0].grid(True)
 
-            current_plot = 1
-
-            # Plot gain histories if using CARTESIAN_SIMPLE_VI mode
-            if (
-                self.task.control_mode == ControlMode.CARTESIAN_SIMPLE_VI
-                and p_gain_history
-                and d_gain_history
-            ):
-                # Plot P gains
-                p_gains_array = np.array(p_gain_history)
-                for i in range(p_gains_array.shape[1]):
-                    axes[current_plot].plot(p_gains_array[:, i], label=f"Actuator {i}")
-                axes[current_plot].set_title("P Gains Over Time")
-                axes[current_plot].set_ylabel("P Gain")
-                axes[current_plot].grid(True)
-                axes[current_plot].legend()
-                current_plot += 1
-
-                # Plot D gains
-                d_gains_array = np.array(d_gain_history)
-                for i in range(d_gains_array.shape[1]):
-                    axes[current_plot].plot(d_gains_array[:, i], label=f"Actuator {i}")
-                axes[current_plot].set_title("D Gains Over Time")
-                axes[current_plot].set_ylabel("D Gain")
-                axes[current_plot].grid(True)
-                axes[current_plot].legend()
-                current_plot += 1
-
             # Plot control signals
             if control_history:
                 control_array = np.array(control_history)
                 for i in range(control_array.shape[1]):
-                    axes[current_plot].plot(control_array[:, i], label=f"Control {i}")
-                axes[current_plot].set_title("Control Signals Over Time")
-                axes[current_plot].set_ylabel("Control Value")
-                axes[current_plot].set_xlabel("Control Steps")
-                axes[current_plot].grid(True)
-                axes[current_plot].legend()
+                    axes[1].plot(control_array[:, i], label=f"Control {i}")
+                axes[1].set_title("Control Signals Over Time")
+                axes[1].set_ylabel("Control Value")
+                axes[1].set_xlabel("Control Steps")
+                axes[1].grid(True)
+                axes[1].legend()
 
             plt.tight_layout()
             plt.savefig("recordings/ros_control_history.png")
@@ -465,20 +448,22 @@ class FrankaRosControl:
 
         # For tracking costs and gains over time
         cost_history = []
-        p_gain_history = []
-        d_gain_history = []
         control_history = []
 
         # For visualization of rollouts
         max_traces = 5
-        trace_width = 5.0
-        trace_color = [1.0, 1.0, 1.0, 0.1]
 
         # Keyboard control parameters
         keyboard_step_size = 0.01
         mocap_index = 0  # Index of mocap body to control
 
         print(f"Starting control loop at {actual_frequency} Hz")
+        self.jit_interp_func = jax.jit(self.controller.interp_func)
+        tq = jnp.arange(0, sim_steps_per_replan) * self.mj_model.opt.timestep
+        tk = self.policy_params.tk
+        knots = self.policy_params.mean[None, ...]
+        _ = self.jit_interp_func(tq, tk, knots)
+        _ = self.jit_interp_func(tq, tk, knots)
 
         # Define keyboard callback
         def key_callback(keycode):
@@ -542,37 +527,23 @@ class FrankaRosControl:
                 plan_time = time.time() - plan_start
 
                 # Get control action
-                t = 0.0  # Time within the current control interval
-                action = self.get_action(self.policy_params, t)
+                sim_dt = self.mj_model.opt.timestep
+                t_curr = self.mj_data.time
+                tq = jnp.arange(0, sim_steps_per_replan) * sim_dt + t_curr
+                tk = self.policy_params.tk
+                knots = self.policy_params.mean[None, ...]
+                us = np.asarray(self.jit_interp_func(tq, tk, knots))[0]  # (ss, nu)
+                action = us[0]
 
                 # Calculate cost for logging and history
                 total_cost = float(jnp.sum(rollouts.costs[0]))
                 cost_history.append(total_cost)
 
-                # Handle the case where the action includes gains
-                if self.task.control_mode == ControlMode.CARTESIAN_SIMPLE_VI:
-                    # Extract control and gains
-                    pose_command, p_gains, d_gains = self.task.extract_gains(action)
+                # Action is directly the pose command
+                self.send_cartesian_command(action)
 
-                    # Update the compliance parameters
-                    trans_p_gain = action[self.task.nu_ctrl]
-                    rot_p_gain = action[self.task.nu_ctrl + 1]
-                    self.update_compliance_params(trans_p_gain, rot_p_gain)
-
-                    # Send cartesian pose command
-                    self.send_cartesian_command(pose_command)
-
-                    # Store history
-                    control_history.append(np.array(pose_command))
-                    p_gain_history.append(np.array(p_gains))
-                    d_gain_history.append(np.array(d_gains))
-                else:
-                    # Action is directly the pose command
-                    pose_command = action
-                    self.send_cartesian_command(pose_command)
-
-                    # Store control history
-                    control_history.append(np.array(pose_command))
+                # Store control history
+                control_history.append(np.array(action))
 
                 # Update the viewer if enabled
                 if enable_viewer:
@@ -616,9 +587,7 @@ class FrankaRosControl:
             print("\nROS connections closed")
 
             # Plot histories
-            self._plot_histories(
-                cost_history, p_gain_history, d_gain_history, control_history
-            )
+            self._plot_histories(cost_history, control_history)
 
 
 def main():
@@ -637,15 +606,8 @@ def main():
         "--controller",
         type=str,
         default="ps",
-        choices=["ps", "mppi"],
-        help="Controller type (ps for Predictive Sampling, mppi for MPPI)",
-    )
-    parser.add_argument(
-        "--control-mode",
-        type=str,
-        choices=["general", "cartesian", "cartesian_simple_vi"],
-        default="general",
-        help="Control mode (general for general control, CARTESIAN_SIMPLE_VI for cartesian impedance control with variable gains)",
+        choices=["ps", "mppi", "cem"],
+        help="Controller type (ps for Predictive Sampling, mppi for MPPI, cem for CEM)",
     )
     parser.add_argument(
         "--enable-viewer",
@@ -660,7 +622,6 @@ def main():
         host=args.host,
         port=args.port,
         controller_type=args.controller,
-        control_mode=args.control_mode,
     )
 
     controller.run_control_loop(
