@@ -14,6 +14,7 @@ MUJOCO_LOG.TXT
 MJDATA.TXT
 recordings/*
 !recordings/.gitkeep
+hydrax/recordings/
 build
 sys_id/collected_data/*
 sys_id/results/*
