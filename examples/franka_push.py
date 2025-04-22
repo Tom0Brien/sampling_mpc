@@ -4,7 +4,7 @@ import evosax
 import mujoco
 import jax.numpy as jnp
 
-from hydrax.algs import MPPI, CEM, Evosax, PredictiveSampling
+from hydrax.algs import MPPI, CEM, CCEM, Evosax, PredictiveSampling
 from hydrax.risk import WorstCase
 from hydrax.simulation.deterministic import run_interactive
 from hydrax.tasks.franka_push import FrankaPush
@@ -28,6 +28,7 @@ subparsers = parser.add_subparsers(
 subparsers.add_parser("ps", help="Predictive Sampling")
 subparsers.add_parser("mppi", help="Model Predictive Path Integral Control")
 subparsers.add_parser("cem", help="Cross-Entropy Method")
+subparsers.add_parser("ccem", help="Constrained Cross-Entropy Method")
 subparsers.add_parser("cmaes", help="CMA-ES")
 subparsers.add_parser(
     "samr", help="Genetic Algorithm with Self-Adaptation Mutation Rate (SAMR)"
@@ -66,6 +67,19 @@ elif args.algorithm == "mppi":
 elif args.algorithm == "cem":
     print("Running CEM")
     ctrl = CEM(
+        task,
+        num_samples=2000,
+        sigma_start=0.1,
+        sigma_min=0.1,
+        num_elites=20,
+        plan_horizon=0.5,
+        spline_type="zero",
+        num_knots=6,
+    )
+
+elif args.algorithm == "ccem":
+    print("Running CCEM")
+    ctrl = CCEM(
         task,
         num_samples=2000,
         sigma_start=0.1,

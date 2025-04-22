@@ -40,6 +40,12 @@ class FrankaPush(Task):
         self.reference_id = mj_model.site("reference").id
         self.box_id = mj_model.body("box").id
 
+        # Table constraint parameters
+        self.table_center = jnp.array([0.5, 0.0, 0.39])  # Center of the table surface
+        self.table_size = jnp.array(
+            [0.35, 0.35]
+        )  # Safe area size (slightly smaller than table)
+
     def running_cost(self, state: mjx.Data, control: jax.Array) -> jax.Array:
         """The running cost ℓ(xₜ, uₜ) encourages pushing the box to the goal."""
         state_cost = self.terminal_cost(state)
@@ -86,3 +92,23 @@ class FrankaPush(Task):
             + 40.0 * box_to_gripper_cost  # Close to box cost
             + 0 * gripper_orientation_cost  # Gripper orientation
         )
+
+    def constraint_cost(self, state: mjx.Data, control: jax.Array) -> jax.Array:
+        """Constraint cost that's positive when the box is near/off the table edge.
+
+        For the constraint c(x,u) ≤ 0, we define the cost to be:
+        - Negative (satisfying constraint) when box is safely on the table
+        - Positive (violating constraint) when box is near/off the edge
+        """
+        # Get current box position
+        box_position = state.xpos[self.box_id]
+
+        # Calculate distance from table center (only in x-y plane)
+        distance = jnp.abs(box_position[:2] - self.table_center[:2])
+
+        # Maximum distance from center in any dimension
+        max_distance = jnp.max(distance)
+
+        # Return cost: positive when outside safe area, negative when inside
+        # Magnitude increases with distance from boundary
+        return max_distance - self.table_size[0]
