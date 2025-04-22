@@ -8,16 +8,16 @@ services:
     stdin_open: true
     tty: true
     environment:
-      - ROS_MASTER_URI=http://172.17.1.1:11311 #IP OF DEVICE RUNNING ROSCORE
-      - ROS_IP=172.17.1.2 #LOCAL HOST IP
+      - ROS_MASTER_URI=http://140.93.7.123:11311 #IP OF DEVICE RUNNING ROSCORE
+      - ROS_IP=140.93.89.46 #LOCAL HOST IP
     command: /bin/bash -c '. /catkin_ws/devel/setup.bash && roslaunch --wait rosbridge_server rosbridge_websocket.launch'
 
   main:
     build: .
     environment:
       - DISPLAY=${DISPLAY}
-      - ROS_MASTER_URI=http://172.17.1.1:11311
-      - ROS_IP=172.17.1.2
+      - ROS_MASTER_URI=http://140.93.7.123:11311
+      - ROS_IP=140.93.89.46
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix
       - ./ros:/catkin_ws/src/ros
