@@ -1,0 +1,3 @@
+[submodule "hydrax-core"]
+	path = hydrax-core
+	url = https://github.com/Tom0Brien/hydrax.git

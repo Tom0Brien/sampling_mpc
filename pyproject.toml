@@ -22,7 +22,7 @@ dependencies = [
     "interpax>=0.3.7",
 ]
 [tool.setuptools]
-packages = ["hydrax"]
+packages = {find = {where = ["."], include = ["hydrax-core", "hydrax"]}}
 
 [tool.uv.sources]
 evosax = { git = "https://github.com/RobertTLange/evosax", rev = "04f9ad4680900a7a56becb39dcccf1ead3389669" }
