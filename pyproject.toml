@@ -3,7 +3,7 @@ name = "sampling_mpc"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12.4"
 dependencies = [
     "evosax",
     "jax[cuda12]>=0.5.2",
@@ -21,11 +21,10 @@ dependencies = [
     "qtm-rt>=3.0.2",
     "interpax>=0.3.7",
 ]
-[tool.setuptools]
-packages = {find = {where = ["."], include = ["hydrax-core", "hydrax"]}}
 
 [tool.uv.sources]
 evosax = { git = "https://github.com/RobertTLange/evosax", rev = "04f9ad4680900a7a56becb39dcccf1ead3389669" }
+hydrax = { path = "./hydrax-core" }
 
 [dependency-groups]
 dev = [
