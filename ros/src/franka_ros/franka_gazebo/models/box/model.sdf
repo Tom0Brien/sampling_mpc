@@ -1,0 +1,72 @@
+<?xml version='1.0'?>
+<sdf version='1.6'>
+  <model name='box'>
+    <link name='link'>
+      <self_collide>0</self_collide>
+      <enable_wind>0</enable_wind>
+      <kinematic>0</kinematic>
+      
+      <inertial>
+        <mass>0.15</mass>
+        <inertia>
+          <ixx>0.0001</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.0001</iyy>
+          <iyz>0</iyz>
+          <izz>0.0001</izz>
+        </inertia>
+      </inertial>
+      
+      <collision name='collision'>
+        <max_contacts>10</max_contacts>
+        <geometry>
+          <box>
+            <size>0.06 0.06 0.06</size>
+          </box>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.6</mu>
+              <mu2>0.6</mu2>
+              <fdir1>0 0 0</fdir1>
+              <slip1>0</slip1>
+              <slip2>0</slip2>
+            </ode>
+          </friction>
+          <bounce>
+            <restitution_coefficient>0</restitution_coefficient>
+            <threshold>1e+06</threshold>
+          </bounce>
+          <contact>
+            <collide_without_contact>0</collide_without_contact>
+            <collide_bitmask>1</collide_bitmask>
+            <ode>
+              <soft_cfm>0</soft_cfm>
+              <soft_erp>0.2</soft_erp>
+              <kp>1e+13</kp>
+              <kd>1</kd>
+              <max_vel>0.01</max_vel>
+              <min_depth>0</min_depth>
+            </ode>
+          </contact>
+        </surface>
+      </collision>
+      
+      <visual name='visual'>
+        <geometry>
+          <box>
+            <size>0.06 0.06 0.06</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.8 0.1 0.1 1</ambient>
+          <diffuse>0.8 0.1 0.1 1</diffuse>
+        </material>
+      </visual>
+    </link>
+    <static>0</static>
+    <allow_auto_disable>0</allow_auto_disable>
+  </model>
+</sdf>

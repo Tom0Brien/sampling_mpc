@@ -7,10 +7,17 @@
   <include file="$(find franka_gazebo)/launch/panda.launch">
     <arg name="arm_id" value="$(arg arm_id)"/>
     <arg name="world" value="$(find franka_gazebo)/world/empty.world"/>
-    <arg name="x" value="-0.5"/>
     <arg name="controller" value="cartesian_impedance_example_controller" />
-     <arg name="interactive_marker" value="false" />
+    <arg name="interactive_marker" value="false" />
   </include>
+
+  <!-- Box pose publisher -->
+  <node name="box_pose_publisher" 
+        pkg="franka_example_controllers" 
+        type="box_pose_publisher.py" 
+        output="screen">
+    <param name="model_path" value="$(find franka_gazebo)/models/box/model.sdf"/>
+  </node>
 
   <!-- Launch visualization -->
   <node pkg="rviz" type="rviz" output="screen" name="rviz" args="-d $(find franka_example_controllers)/launch/rviz/franka_description_with_marker.rviz -f $(arg arm_id)_link0 --splash-screen $(find franka_visualization)/splash.png"/>
