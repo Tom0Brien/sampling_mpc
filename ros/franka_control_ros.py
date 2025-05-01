@@ -603,7 +603,7 @@ def main():
     parser.add_argument(
         "--controller",
         type=str,
-        default="ps",
+        default="cem",
         choices=["ps", "mppi", "cem"],
         help="Controller type (ps for Predictive Sampling, mppi for MPPI, cem for CEM)",
     )
