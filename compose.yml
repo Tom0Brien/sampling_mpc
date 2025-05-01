@@ -1,12 +1,38 @@
 version: "3"
 
+# Define named volumes at the top level
+volumes:
+  catkin_ws_build:
+  libfranka_build:
+
 services:
+  build_ws:
+    build: .
+    volumes:
+      - ./ros:/catkin_ws/src/ros
+      - ./ros/src/franka_ros:/catkin_ws/src/franka_ros
+      - ./build_workspace.sh:/build_workspace.sh
+      - catkin_ws_build:/catkin_ws/build
+      - catkin_ws_build:/catkin_ws/devel
+    command: >
+      bash -c "
+        chmod +x /build_workspace.sh &&
+        /build_workspace.sh
+      "
+
   roscore:
     build: .
     network_mode: host
     privileged: true
     stdin_open: true
     tty: true
+    volumes:
+      - ./ros/src/franka_ros:/catkin_ws/src/franka_ros
+      - catkin_ws_build:/catkin_ws/build
+      - catkin_ws_build:/catkin_ws/devel
+    depends_on:
+      build_ws:
+        condition: service_completed_successfully
     command: roscore
 
   rosbridge:
@@ -15,8 +41,15 @@ services:
     privileged: true
     stdin_open: true
     tty: true
+    volumes:
+      - ./ros/src/franka_ros:/catkin_ws/src/franka_ros
+      - catkin_ws_build:/catkin_ws/build
+      - catkin_ws_build:/catkin_ws/devel
     depends_on:
-      - roscore
+      build_ws:
+        condition: service_completed_successfully
+      roscore:
+        condition: service_started
     command: /bin/bash -c '. /catkin_ws/devel/setup.bash && roslaunch --wait rosbridge_server rosbridge_websocket.launch'
 
   cartesian_impedance_control:
@@ -24,9 +57,13 @@ services:
     environment:
       - DISPLAY=${DISPLAY}
       - GAZEBO_MODEL_PATH=/catkin_ws/src/franka_ros/franka_description/robots
+      - FCI_IP=${FCI_IP}
+      - LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix
-      - ./ros/cartesian_impedance_example_controller_no_marker.launch:/catkin_ws/src/franka_ros/franka_example_controllers/launch/cartesian_impedance_example_controller_no_marker.launch
+      - ./ros/src/franka_ros:/catkin_ws/src/franka_ros
+      - catkin_ws_build:/catkin_ws/build
+      - catkin_ws_build:/catkin_ws/devel
       - .:/app
       - /app/.venv
     network_mode: host
@@ -34,8 +71,11 @@ services:
     stdin_open: true
     tty: true
     depends_on:
-      - roscore
-    command: /bin/bash -c '. /catkin_ws/devel/setup.bash && roslaunch --wait franka_example_controllers cartesian_impedance_example_controller_no_marker.launch robot:=panda load_gripper:=True'
+      build_ws:
+        condition: service_completed_successfully
+      roscore:
+        condition: service_started
+    command: /bin/bash -c '. /catkin_ws/devel/setup.bash && roslaunch --wait franka_example_controllers cartesian_impedance_example_controller_no_marker.launch robot:=panda load_gripper:=True robot_ip:=${FCI_IP}'
 
   main:
     build: .
@@ -44,6 +84,10 @@ services:
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix
       - ./ros:/catkin_ws/src/ros
+      - ./ros/src/franka_ros:/catkin_ws/src/franka_ros
+      - ./build_workspace.sh:/build_workspace.sh
+      - catkin_ws_build:/catkin_ws/build
+      - catkin_ws_build:/catkin_ws/devel
       - .:/app
       - /app/.venv
     ports:
@@ -53,8 +97,12 @@ services:
     stdin_open: true
     tty: true
     depends_on:
-      - roscore
-      - rosbridge
+      build_ws:
+        condition: service_completed_successfully
+      roscore:
+        condition: service_started
+      rosbridge:
+        condition: service_started
     develop:
       watch:
         - action: sync
