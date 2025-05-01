@@ -610,7 +610,7 @@ def main():
     parser.add_argument(
         "--enable-viewer",
         action="store_true",
-        default=False,
+        default=True,
         help="Enable MuJoCo viewer for debugging",
     )
 
