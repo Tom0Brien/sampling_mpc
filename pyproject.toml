@@ -20,6 +20,7 @@ dependencies = [
     "scikit-learn>=1.6.1",
     "qtm-rt>=3.0.2",
     "interpax>=0.3.7",
+    "pytest>=8.3.5",
 ]
 
 [tool.uv.sources]
@@ -30,3 +31,7 @@ hydrax = { path = "./hydrax-core" }
 dev = [
     "ruff>=0.9.10",
 ]
+
+[tool.setuptools.packages.find]
+include = ["hydrax-core*"]      # only this package tree goes in the wheel
+exclude = ["ros*", "sys_id*", "recordings*"]
