@@ -129,7 +129,7 @@ class FrankaRosControl:
         self.translational_stiffness = 200.0  # N/m
         self.rotational_stiffness = 10.0  # Nm/rad
         self.nullspace_stiffness = 1.0
-        initial_control = jnp.tile(
+        initial_knots = jnp.tile(
             jnp.array(
                 [
                     0.5,  # x reference
@@ -148,9 +148,7 @@ class FrankaRosControl:
         )
 
         # Initialize policy parameters and initial control sequence
-        self.policy_params = self.controller.init_params(
-            initial_control=initial_control
-        )
+        self.policy_params = self.controller.init_params(initial_knots=initial_knots)
 
         # Set up joint and franka state callbacks
         self.ee_position = np.zeros(3)
