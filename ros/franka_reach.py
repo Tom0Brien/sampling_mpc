@@ -2,6 +2,7 @@
 import numpy as np
 import mujoco
 from hydrax.tasks.franka_reach import FrankaReach
+import time
 
 from hydrax_hardware_interface import HydraxHardwareInterface, ControlResult
 from franka import FrankaRosInterface
@@ -40,35 +41,26 @@ class FrankaHydraxController(HydraxHardwareInterface):
         # Initialize the goal
         self.target_position = np.array([0.5, 0.0, 0.4])
 
-    def _update_internal_state(self, state_data):
-        """Update internal MuJoCo state with Franka state data"""
-        # Extract state data
-        joint_positions = state_data["joint_positions"]
-        joint_velocities = state_data["joint_velocities"]
+    def update_state(self):
+        """Update internal MuJoCo state with Franka state data and current time"""
 
         # Update MuJoCo data with latest robot state
-        self.mj_data.qpos[:7] = joint_positions  # 7 Franka joints
-        self.mj_data.qvel[:7] = joint_velocities
+        self.mj_data.time = time.time()
+        self.mj_data.qpos[:7] = self.franka.q
+        self.mj_data.qvel[:7] = self.franka.dq
 
         # Set the mocap position to the target position
         self.mj_data.mocap_pos[0] = self.target_position
 
-    def set_goal(self, goal_position):
-        """Set a new target position for the controller"""
-        self.target_position = np.array(goal_position)
-
     def send_command(self, action):
         """Send control action to the Franka robot"""
         # Delegate to the ROS interface
+        print(f"Sending command: {action}")
         self.franka.send_cartesian_command(action[:3], action[3:])
 
-    def get_state(self):
-        """Get the latest state from the Franka robot"""
-        return {
-            "joint_positions": self.franka.q,
-            "joint_velocities": self.franka.dq,
-            "ee_position": self.franka.ee_position,
-        }
+    def set_goal(self, goal_position):
+        """Set a new target position for the controller"""
+        self.target_position = np.array(goal_position)
 
 
 def main():
@@ -118,7 +110,7 @@ def main():
         controller_type=args.controller,
         controller_config=controller_config,
         control_frequency=100.0,
-        planning_frequency=10.0,
+        planning_frequency=5.0,
         ros_host=args.host,
         ros_port=args.port,
         initial_knots=initial_knots,

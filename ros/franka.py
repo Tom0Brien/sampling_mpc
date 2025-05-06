@@ -134,7 +134,6 @@ class FrankaRosInterface:
         position: [x, y, z]
         orientation: [r, p, y] or None for default orientation
         """
-        print(f"Sending cartesian command: {position}, {orientation}")
         # Use default orientation if none provided
         if orientation is None:
             quat = Rotation.from_euler("xyz", [-3.14, 0.0, 0.0]).as_quat()

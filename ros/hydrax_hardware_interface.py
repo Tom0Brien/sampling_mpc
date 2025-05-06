@@ -157,113 +157,104 @@ class HydraxHardwareInterface:
     def _compile_functions(self):
         """JIT-compile controller functions for efficiency"""
         # Compile optimize function with donation to avoid memory allocations
+        start_time = time.time()
+        print("Jitting the controller...")
         self.jit_optimize = jax.jit(self.controller.optimize, donate_argnums=(1,))
-
-        # Compile interpolation function for smooth action application
         self.jit_interp_func = jax.jit(self.controller.interp_func)
 
+        # Warm up the JIT functions
+        try:
+            # First put some data onto GPU
+            mjx_data = mjx.put_data(self.task.mj_model, self.mj_data)
+            # Run the optimization twice to warm up the JIT stuff... weird but necessary
+            self.policy_params, _ = self.jit_optimize(mjx_data, self.policy_params)
+            self.policy_params, _ = self.jit_optimize(mjx_data, self.policy_params)
+            sim_steps_per_replan = int(
+                self.planning_dt / self.task.mj_model.opt.timestep
+            )
+            tq = jnp.arange(0, sim_steps_per_replan) * self.task.mj_model.opt.timestep
+            tk = self.policy_params.tk
+            knots = self.policy_params.mean[None, ...]
+            _ = self.jit_interp_func(tq, tk, knots)
+            _ = self.jit_interp_func(tq, tk, knots)
+
+            compile_time = time.time() - start_time
+            print(f"JIT compilation complete in {compile_time:.4f}s")
+
+        except Exception as e:
+            print(f"Warning: JIT warmup failed with error: {e}")
+            print("Controller will continue, but first planning cycle may be slow")
+
     def _start_planning_thread(self):
-        """Start the asynchronous planning thread"""
+        """Start the asynchronous planning thread with improved timing"""
 
         def planning_worker():
             """Worker function for the planning thread"""
-            while not self.should_stop.is_set():
-                # Wait for signal to plan or timeout
-                self.planning_event.wait(timeout=self.planning_dt)
-                self.planning_event.clear()
 
-                # Check if we should stop
+            while not self.should_stop.is_set():
+                try:
+                    self.status = ControllerStatus.PLANNING
+                    planning_start = time.time()
+                    # Get the latest state data under the lock
+                    with self.state_lock:
+                        # Create a fresh mjx_data from the latest CPU state
+                        mjx_data = mjx.put_data(self.task.mj_model, self.mj_data)
+
+                    # Run optimization with the latest state
+                    with self.plan_lock:
+                        self.policy_params, rollouts = self.jit_optimize(
+                            mjx_data, self.policy_params
+                        )
+                        self.latest_plan = rollouts
+                        self.plan_timestamp = self.mj_data.time
+                    planning_end = time.time()
+                    # Update status
+                    self.status = ControllerStatus.READY
+
+                    planning_time = planning_end - planning_start
+                    print(f"Planning time: {planning_time:.4f}s")
+
+                    cost = (
+                        float(jnp.sum(rollouts.costs[0]))
+                        if rollouts is not None
+                        else None
+                    )
+                    if cost is not None:
+                        print(f"Cost: {cost:.4f}")
+
+                    # Calculate next planning time
+                    next_planning_time = max(
+                        # Either planning_start + planning_dt (desired frequency)
+                        self.plan_timestamp + self.planning_dt,
+                        # Or current time (in case planning took longer than planning_dt)
+                        planning_end,
+                    )
+
+                    # Calculate sleep time
+                    sleep_time = next_planning_time - planning_end
+
+                    # Only sleep if needed (if planning was faster than planning_dt)
+                    if sleep_time > 0 and not self.should_stop.is_set():
+                        time.sleep(sleep_time)
+                    else:
+                        time_overrun = time.time() - next_planning_time
+                        print(
+                            f"Warning: Planning thread is behind schedule by {time_overrun:.4f}s"
+                        )
+
+                except Exception as e:
+                    print(f"Error during planning: {e}")
+                    self.status = ControllerStatus.ERROR
+
+                # Check if we should stop after sleeping
                 if self.should_stop.is_set():
                     break
-
-                # Do planning
-                self._plan()
 
         # Create and start planning thread
         self.planning_thread = threading.Thread(target=planning_worker, daemon=True)
         self.planning_thread.start()
 
-        # Signal to start planning immediately
-        self.planning_event.set()
-
-    def _plan(self):
-        """
-        Run planning using the latest state data.
-        This is called by the planning thread.
-        """
-        try:
-            self.status = ControllerStatus.PLANNING
-
-            # Get the latest state data under the lock
-            with self.state_lock:
-                # Create a fresh mjx_data from the latest CPU state
-                mjx_data = mjx.put_data(self.task.mj_model, self.mj_data)
-
-            # Run optimization with the latest state
-            start_time = time.time()
-            with self.plan_lock:
-                self.policy_params, rollouts = self.jit_optimize(
-                    mjx_data, self.policy_params
-                )
-                self.latest_plan = rollouts
-                self.plan_timestamp = time.time()
-
-            plan_time = time.time() - start_time
-
-            # Update status
-            self.status = ControllerStatus.READY
-
-            cost = float(jnp.sum(rollouts.costs[0])) if rollouts is not None else None
-            print(f"Planning completed in {plan_time:.4f}s")
-            if cost is not None:
-                print(f"Cost: {cost:.4f}")
-
-        except Exception as e:
-            print(f"Error during planning: {e}")
-            self.status = ControllerStatus.ERROR
-
-    def update_state(self, state_data):
-        """
-        Update the internal state with the latest sensor data.
-        This function should be called whenever new sensor data is available.
-
-        Args:
-            state_data: Hardware-specific state data
-
-        Returns:
-            bool: True if state was successfully updated
-        """
-        with self.state_lock:
-            try:
-                # Update the CPU state
-                self._update_internal_state(state_data)
-
-                # Run forward kinematics to ensure consistency
-                mujoco.mj_forward(self.task.mj_model, self.mj_data)
-
-                # Update timestamp
-                self.last_state_update_time = time.time()
-
-                # Signal planning thread that new state is available
-                self.planning_event.set()
-
-                return True
-            except Exception as e:
-                print(f"Error updating state: {e}")
-                self.status = ControllerStatus.ERROR
-                return False
-
-    def _update_internal_state(self, state_data):
-        """
-        Convert hardware state data to internal MuJoCo state.
-        This method must be implemented by subclasses.
-
-        Args:
-            state_data: Hardware-specific state data
-        """
-        raise NotImplementedError("This method must be implemented by subclasses")
-
-    def get_action(self, current_time=None):
+    def _get_action(self, current_time=None):
         """
         Get the control action for the current time by interpolating the latest plan.
 
@@ -329,6 +320,38 @@ class HydraxHardwareInterface:
                     info={"status": "error", "error": str(e)},
                 )
 
+    def update_state(self, state_data):
+        """
+        Convert hardware state data to internal MuJoCo state.
+        This method must be implemented by subclasses and update state including time.
+
+        Args:
+            state_data: Hardware-specific state data
+        """
+        raise NotImplementedError("This method must be implemented by subclasses")
+
+    def stop(self):
+        """Stop all running threads and clean up resources"""
+        # Signal threads to stop
+        self.should_stop.set()
+        self.planning_event.set()  # Wake up planning thread
+
+        # Wait for planning thread to finish
+        if self.planning_thread is not None and self.planning_thread.is_alive():
+            self.planning_thread.join(timeout=1.0)
+
+        print("Controller stopped")
+
+    def send_command(self, action):
+        """
+        Send a command to the hardware.
+        This method must be implemented by subclasses.
+
+        Args:
+            action: Control action to send
+        """
+        raise NotImplementedError("This method must be implemented by subclasses")
+
     def run_control_loop(self, hardware_interface, max_iterations=None, duration=None):
         """
         Run the main control loop that updates state, plans, and acts.
@@ -354,12 +377,11 @@ class HydraxHardwareInterface:
                     print(f"Reached max duration ({duration}s)")
                     break
 
-                # Get latest state from hardware
-                state_data = hardware_interface.get_state()
-                self.update_state(state_data)
+                # Get latest state from hardware (defined by subclass)
+                self.update_state()
 
-                # Get action for current time
-                control_result = self.get_action()
+                # Get action for current time (defined by subclass)
+                control_result = self._get_action()
 
                 # Send action to hardware
                 self.send_command(control_result.action)
@@ -392,35 +414,3 @@ class HydraxHardwareInterface:
         finally:
             # Clean up
             self.stop()
-
-    def stop(self):
-        """Stop all running threads and clean up resources"""
-        # Signal threads to stop
-        self.should_stop.set()
-        self.planning_event.set()  # Wake up planning thread
-
-        # Wait for planning thread to finish
-        if self.planning_thread is not None and self.planning_thread.is_alive():
-            self.planning_thread.join(timeout=1.0)
-
-        print("Controller stopped")
-
-    def set_goal(self, goal):
-        """
-        Set a new goal for the controller.
-        This method must be implemented by subclasses.
-
-        Args:
-            goal: Task-specific goal representation
-        """
-        raise NotImplementedError("This method must be implemented by subclasses")
-
-    def send_command(self, action):
-        """
-        Send a command to the hardware.
-        This method must be implemented by subclasses.
-
-        Args:
-            action: Control action to send
-        """
-        raise NotImplementedError("This method must be implemented by subclasses")
