@@ -127,6 +127,15 @@ def main():
     if args.debug:
         controller.start_debug_viewer()
 
+    # Start keyboard control thread
+    keyboard_thread = start_keyboard_control(controller)
+    print("Keyboard control enabled. Use the following keys:")
+    print("  w/s: Move along X axis (+/-)")
+    print("  a/d: Move along Y axis (+/-)")
+    print("  q/e: Move along Z axis (+/-)")
+    print("  r: Reset to initial position [0.5, 0.0, 0.4]")
+    print("  Esc: Exit")
+
     try:
         # Run control loop
         # Note: hardware_interface is now the controller itself, since it has the franka interface
@@ -135,6 +144,80 @@ def main():
         # Clean up
         controller.stop()
         controller.franka.close()
+        # Signal keyboard thread to stop if it exists
+        if keyboard_thread:
+            keyboard_thread.join(timeout=1.0)
+
+
+def start_keyboard_control(controller, step_size=0.05):
+    """
+    Start a thread that listens for keyboard input using pynput
+
+    Args:
+        controller: FrankaHydraxController instance
+        step_size: Step size for goal position adjustment (meters)
+
+    Returns:
+        Thread object for the keyboard control thread
+    """
+    import threading
+    from pynput import keyboard
+
+    def keyboard_control_thread():
+        # Flag to indicate if the thread should terminate
+        stop_thread = threading.Event()
+
+        def on_press(key):
+            try:
+                # Get current goal position
+                current_goal = controller.target_position.copy()
+
+                # Convert key to string if possible
+                k = key.char.lower() if hasattr(key, "char") else None
+
+                # Update goal based on key press
+                if k == "w":
+                    current_goal[0] += step_size
+                elif k == "s":
+                    current_goal[0] -= step_size
+                elif k == "d":
+                    current_goal[1] += step_size
+                elif k == "a":
+                    current_goal[1] -= step_size
+                elif k == "q":
+                    current_goal[2] += step_size
+                elif k == "e":
+                    current_goal[2] -= step_size
+                elif k == "r":
+                    current_goal = np.array([0.5, 0.0, 0.4])
+                elif key == keyboard.Key.esc:
+                    print("Exiting keyboard control")
+                    stop_thread.set()
+                    return False
+                else:
+                    return
+
+                # Set the new goal position
+                controller.set_goal(current_goal)
+                print(f"New goal: {current_goal}")
+            except Exception as e:
+                print(f"Error in keyboard handler: {e}")
+
+        # Create keyboard listener
+        listener = keyboard.Listener(on_press=on_press)
+        listener.start()
+
+        # Wait until stop flag is set
+        try:
+            while not stop_thread.is_set():
+                time.sleep(0.1)
+        finally:
+            listener.stop()
+
+    # Create and start the thread
+    thread = threading.Thread(target=keyboard_control_thread, daemon=True)
+    thread.start()
+    return thread
 
 
 if __name__ == "__main__":
