@@ -4,7 +4,7 @@ import mujoco
 from hydrax.tasks.franka_reach import FrankaReach
 import time
 
-from hydrax_hardware_interface import HydraxHardwareInterface, ControlResult
+from hydrax_hardware_interface import HydraxHardwareInterface
 from franka import FrankaRosInterface
 import jax.numpy as jnp
 
@@ -51,11 +51,11 @@ class FrankaHydraxController(HydraxHardwareInterface):
 
         # Set the mocap position to the target position
         self.mj_data.mocap_pos[0] = self.target_position
+        mujoco.mj_forward(self.task.mj_model, self.mj_data)
 
     def send_command(self, action):
         """Send control action to the Franka robot"""
         # Delegate to the ROS interface
-        print(f"Sending command: {action}")
         self.franka.send_cartesian_command(action[:3], action[3:])
 
     def set_goal(self, goal_position):
@@ -82,14 +82,19 @@ def main():
     parser.add_argument(
         "--duration", type=float, default=60.0, help="Control duration in seconds"
     )
+    parser.add_argument("--debug", action="store_true", help="Start debug viewer")
 
     args = parser.parse_args()
 
     # Configure controller
     controller_config = {
-        "num_samples": 512,
+        "num_samples": 1024,
         "plan_horizon": 0.5,
-        "num_knots": 11,
+        "num_knots": 6,
+        "sigma_start": 0.1,
+        "sigma_min": 0.005,
+        "num_elites": 32,
+        "spline_type": "zero",
     }
 
     initial_knots = jnp.tile(
@@ -109,15 +114,18 @@ def main():
     controller = FrankaHydraxController(
         controller_type=args.controller,
         controller_config=controller_config,
-        control_frequency=100.0,
+        control_frequency=50.0,
         planning_frequency=5.0,
         ros_host=args.host,
         ros_port=args.port,
         initial_knots=initial_knots,
     )
 
-    # Set a goal
-    controller.set_goal([0.5, 0.2, 0.5])
+    # Set the initial goal
+    controller.set_goal([0.5, 0.0, 0.4])
+
+    if args.debug:
+        controller.start_debug_viewer()
 
     try:
         # Run control loop

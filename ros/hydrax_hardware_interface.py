@@ -358,3 +358,109 @@ class HydraxHardwareInterface:
         finally:
             # Clean up
             self.stop()
+
+    def start_debug_viewer(
+        self,
+        show_traces=False,
+        max_traces=5,
+        trace_width=5.0,
+        trace_color=[1.0, 1.0, 1.0, 0.1],
+        fixed_camera_id=None,
+    ):
+        """
+        Start a MuJoCo viewer in a separate thread for debugging.
+
+        Args:
+            show_traces: Whether to show traces for planned trajectories
+            max_traces: Maximum number of traces to show at once
+            trace_width: Width of trace lines
+            trace_color: RGBA color of trace lines
+            fixed_camera_id: Camera ID to use for fixed view (None for default)
+        """
+        import mujoco.viewer
+
+        # Define a function to run the viewer in a separate thread
+        def viewer_thread_fn():
+            with mujoco.viewer.launch_passive(
+                self.task.mj_model, self.mj_data
+            ) as viewer:
+                mujoco.mj_forward(self.task.mj_model, self.mj_data)
+                if fixed_camera_id is not None:
+                    # Set the custom camera
+                    viewer.cam.fixedcamid = fixed_camera_id
+                    viewer.cam.type = 2
+
+                # Set up rollout traces if requested
+                trace_geoms = []
+                if show_traces and hasattr(self.task, "trace_site_ids"):
+                    num_trace_sites = len(self.task.trace_site_ids)
+                    ctrl_steps = (
+                        self.controller.ctrl_steps
+                        if hasattr(self.controller, "ctrl_steps")
+                        else 10
+                    )
+
+                    for i in range(num_trace_sites * max_traces * ctrl_steps):
+                        mujoco.mjv_initGeom(
+                            viewer.user_scn.geoms[i],
+                            type=mujoco.mjtGeom.mjGEOM_LINE,
+                            size=np.zeros(3),
+                            pos=np.zeros(3),
+                            mat=np.eye(3).flatten(),
+                            rgba=np.array(trace_color),
+                        )
+                        viewer.user_scn.ngeom += 1
+                        trace_geoms.append(viewer.user_scn.geoms[i])
+
+                # Main viewer loop
+                while viewer.is_running() and not self.should_stop.is_set():
+                    # Synchronize the viewer with the latest state
+                    with self.state_lock:
+                        viewer.sync()
+
+                    # Update trace visualization if we have rollouts and should show traces
+                    if (
+                        show_traces
+                        and self.latest_plan is not None
+                        and hasattr(self.task, "trace_site_ids")
+                    ):
+                        with self.plan_lock:
+                            if hasattr(self.latest_plan, "trace_sites"):
+                                ii = 0
+                                for k in range(num_trace_sites):
+                                    for i in range(
+                                        min(
+                                            max_traces,
+                                            self.latest_plan.trace_sites.shape[0],
+                                        )
+                                    ):
+                                        for j in range(
+                                            self.latest_plan.trace_sites.shape[1] - 1
+                                        ):
+                                            if ii < len(trace_geoms):
+                                                mujoco.mjv_connector(
+                                                    trace_geoms[ii],
+                                                    mujoco.mjtGeom.mjGEOM_LINE,
+                                                    trace_width,
+                                                    np.array(
+                                                        self.latest_plan.trace_sites[
+                                                            i, j, k
+                                                        ]
+                                                    ),
+                                                    np.array(
+                                                        self.latest_plan.trace_sites[
+                                                            i, j + 1, k
+                                                        ]
+                                                    ),
+                                                )
+                                                ii += 1
+
+                    # Pause to avoid hogging CPU
+                    time.sleep(1.0 / 60.0)  # Approx. 60 FPS
+
+        # Create and start the viewer thread
+        self.viewer_thread = threading.Thread(target=viewer_thread_fn, daemon=True)
+        self.viewer_thread.start()
+        print("Debug viewer started. Close the viewer window to stop.")
+
+        return self.viewer_thread
