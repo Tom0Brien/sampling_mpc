@@ -80,8 +80,8 @@ class FrankaRosInterface:
 
         # If you have O_T_EE (end effector transform), you can extract position:
         if "O_T_EE" in message:
-            transform = np.array(message["O_T_EE"]).reshape(4, 4)
-            self.ee_position = transform[:3, 3]  # Translation part
+            O_T_EE = np.transpose(np.reshape(message["O_T_EE"], (4, 4)))
+            self.ee_position = O_T_EE[:3, 3]  # Translation part
 
     def update_compliance_params(
         self, translational_stiffness, rotational_stiffness, nullspace_stiffness=10.0
@@ -151,9 +151,13 @@ class FrankaRosInterface:
             },
             "pose": {
                 "position": {
-                    "x": float(position[0]),
+                    "x": float(
+                        position[0] + 0.013
+                    ),  # OFFSET - TODO: Figure out why this is needed
                     "y": float(position[1]),
-                    "z": float(position[2]),
+                    "z": float(
+                        position[2] - 0.007
+                    ),  # OFFSET - TODO: Figure out why this is needed
                 },
                 "orientation": {
                     "x": float(quat[0]),
