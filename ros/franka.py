@@ -33,6 +33,16 @@ class FrankaRosInterface:
         )
         self.cartesian_pose_pub.advertise()
 
+        # Setup gripper publishers
+        self.gripper_move_pub = roslibpy.Topic(
+            self.client, "/franka_gripper/move/goal", "franka_gripper/MoveActionGoal"
+        )
+        self.gripper_grasp_pub = roslibpy.Topic(
+            self.client, "/franka_gripper/grasp/goal", "franka_gripper/GraspActionGoal"
+        )
+        self.gripper_move_pub.advertise()
+        self.gripper_grasp_pub.advertise()
+
         # Setup dynamic reconfigure compliance service
         self.compliance_param_client = roslibpy.Service(
             self.client,
@@ -69,6 +79,10 @@ class FrankaRosInterface:
             self.rotational_stiffness,
             self.nullspace_stiffness,
         )
+
+        # Close the gripper during initialization
+        print("Closing the gripper...")
+        self.close_gripper()
 
     def franka_state_callback(self, message):
         """Callback for franka state messages"""
@@ -171,9 +185,34 @@ class FrankaRosInterface:
         # Publish the pose message
         self.cartesian_pose_pub.publish(roslibpy.Message(pose_msg))
 
+    def close_gripper(self, width=0.03, epsilon=0.005, speed=0.1, force=5.0):
+        """Close the gripper with the specified parameters"""
+        grasp_msg = {
+            "goal": {
+                "width": width,
+                "epsilon": {"inner": epsilon, "outer": epsilon},
+                "speed": speed,
+                "force": force,
+            }
+        }
+        self.gripper_grasp_pub.publish(roslibpy.Message(grasp_msg))
+        # Allow some time for the gripper to close
+        time.sleep(3.0)
+        print("Gripper close command sent")
+
+    def open_gripper(self, width=0.08, speed=0.1):
+        """Open the gripper with the specified parameters"""
+        move_msg = {"goal": {"width": width, "speed": speed}}
+        self.gripper_move_pub.publish(roslibpy.Message(move_msg))
+        # Allow some time for the gripper to open
+        time.sleep(3.0)
+        print("Gripper open command sent")
+
     def close(self):
         """Close all connections"""
         self.cartesian_pose_pub.unadvertise()
         self.franka_state_sub.unsubscribe()
+        self.gripper_move_pub.unadvertise()
+        self.gripper_grasp_pub.unadvertise()
         self.client.terminate()
         print("ROS connections closed")

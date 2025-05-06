@@ -186,6 +186,9 @@ class HydraxHardwareInterface:
                 self.policy_params
             )  # Start with shared initial params
 
+            # Add a flag to indicate when new parameters are ready
+            self.new_plan_ready = threading.Event()
+
             while not self.should_stop.is_set():
                 try:
                     self.status = ControllerStatus.PLANNING
@@ -213,6 +216,8 @@ class HydraxHardwareInterface:
                         self.active_policy_params = active_params_copy
                         self.latest_plan = rollouts
                         self.plan_timestamp = self.mj_data.time
+                        # Signal that a new plan is ready
+                        self.new_plan_ready.set()
 
                     planning_end = time.time()
                     self.status = ControllerStatus.READY
@@ -312,6 +317,11 @@ class HydraxHardwareInterface:
         start_time = time.time()
         iteration = 0
         print("Starting control loop")
+
+        # Initialize current parameters
+        with self.plan_lock:
+            current_params = self.active_policy_params
+
         try:
             while True:
                 loop_start = time.time()
@@ -328,18 +338,22 @@ class HydraxHardwareInterface:
                 # Get latest state from hardware (defined by subclass)
                 self.update_state()
 
-                # Send action to hardware - access the active policy params which
-                # are updated atomically by the planning thread
-                with self.plan_lock:
-                    # Only a brief lock to get a reference to the current parameters
-                    current_params = self.active_policy_params
+                # Check if a new plan is ready (non-blocking)
+                if self.new_plan_ready.is_set():
+                    # A new plan is ready, update the local copy of parameters
+                    with self.plan_lock:
+                        current_params = self.active_policy_params
+                        # Reset the flag
+                        self.new_plan_ready.clear()
+                    print(f"Using new plan from time {self.plan_timestamp:.4f}")
 
                 # Use the parameters without the lock
                 if current_params is not None:
                     action = np.array(
-                        self.jit_get_action(current_params, time.time()),
+                        self.jit_get_action(current_params, jnp.float32(time.time())),
                         dtype=np.float32,
                     )
+                    print("action: ", action)
                     self.send_command(action)
                 else:
                     print("Warning: No policy parameters available yet")
@@ -349,7 +363,7 @@ class HydraxHardwareInterface:
                 if elapsed < self.control_dt:
                     time.sleep(self.control_dt - elapsed)
                 else:
-                    print(f"Control loop is behind schedule by {elapsed:.4f}s")
+                    print(f"Control update is behind schedule by {elapsed:.4f}s")
 
                 iteration += 1
 
