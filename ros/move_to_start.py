@@ -5,7 +5,7 @@ import time
 def main():
     franka = FrankaRosInterface()
     while franka.client.is_connected:
-        franka.send_cartesian_command([0.5, 0.0, 0.4])
+        franka.send_cartesian_command([0.4, 0.0, 0.4])
         time.sleep(1)
 
 
