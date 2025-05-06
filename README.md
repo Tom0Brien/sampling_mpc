@@ -5,9 +5,11 @@ Exploring Sampling based MPC. Building upon [`hydrax`](https://github.com/vincek
 # Setup uv environment
 
 1. [Install uv](https://docs.astral.sh/uv/getting-started/installation/), a faster alternative to `pip`
-2. Create a virtual environment: `uv venv --python 3.11`
-3. Activate it: `source .venv/bin/activate`
-4. Install `uv pip install -e ".[all]"`
+2. Initialize and update git submodules: `git submodule update --init --recursive`
+3. Create a virtual environment: `uv venv --python 3.11`
+4. Activate it: `source .venv/bin/activate`
+5. Install project dependencies: `uv pip install -e ".[all]"`
+6. Make sure hydrax is properly installed: `uv pip install -e ./hydrax-core`
 
 # Dockerized Franka ROS interface
 
