@@ -4,6 +4,7 @@ import threading
 import numpy as np
 import jax
 import jax.numpy as jnp
+import jax.tree_util
 from typing import Any, Dict, Optional
 from enum import Enum
 from dataclasses import dataclass
@@ -18,16 +19,6 @@ class ControllerStatus(Enum):
     PLANNING = 1
     READY = 2
     ERROR = 3
-
-
-@dataclass
-class ControlResult:
-    """Container for controller results"""
-
-    action: np.ndarray
-    timestamp: float
-    cost: Optional[float] = None
-    info: Optional[Dict[str, Any]] = None
 
 
 class HydraxHardwareInterface:
@@ -90,6 +81,9 @@ class HydraxHardwareInterface:
         # Start planning thread
         self._start_planning_thread()
 
+        # Add this to your initialization:
+        self.active_policy_params = None
+
     def _init_controller(self, initial_knots):
         """Initialize the Hydrax controller based on type"""
         from hydrax.algs import MPPI, PredictiveSampling, CEM
@@ -131,7 +125,7 @@ class HydraxHardwareInterface:
                 "num_elites": 20,
                 "sigma_start": 0.025,
                 "sigma_min": 0.005,
-                "explore_fraction": 0.5,
+                "explore_fraction": 0.0,
             }
 
             # Override with provided config
@@ -160,57 +154,70 @@ class HydraxHardwareInterface:
         start_time = time.time()
         print("Jitting the controller...")
         self.jit_optimize = jax.jit(self.controller.optimize, donate_argnums=(1,))
-        self.jit_interp_func = jax.jit(self.controller.interp_func)
+        self.jit_get_action = jax.jit(self.controller.get_action)
 
         # Warm up the JIT functions
         try:
             # First put some data onto GPU
             mjx_data = mjx.put_data(self.task.mj_model, self.mj_data)
-            # Run the optimization twice to warm up the JIT stuff... weird but necessary
+            # Run the optimization twice to warm up the JIT stuff
             self.policy_params, _ = self.jit_optimize(mjx_data, self.policy_params)
             self.policy_params, _ = self.jit_optimize(mjx_data, self.policy_params)
-            sim_steps_per_replan = int(
-                self.planning_dt / self.task.mj_model.opt.timestep
-            )
-            tq = jnp.arange(0, sim_steps_per_replan) * self.task.mj_model.opt.timestep
-            tk = self.policy_params.tk
-            knots = self.policy_params.mean[None, ...]
-            _ = self.jit_interp_func(tq, tk, knots)
-            _ = self.jit_interp_func(tq, tk, knots)
+
+            # Set active policy params initially
+            self.active_policy_params = self.policy_params
+
+            action = self.jit_get_action(self.active_policy_params, 0.0)
+            action = self.jit_get_action(self.active_policy_params, 0.0)
 
             compile_time = time.time() - start_time
             print(f"JIT compilation complete in {compile_time:.4f}s")
 
         except Exception as e:
             print(f"Warning: JIT warmup failed with error: {e}")
-            print("Controller will continue, but first planning cycle may be slow")
 
     def _start_planning_thread(self):
         """Start the asynchronous planning thread with improved timing"""
 
         def planning_worker():
             """Worker function for the planning thread"""
+            # Create local policy params for planning
+            planning_policy_params = (
+                self.policy_params
+            )  # Start with shared initial params
 
             while not self.should_stop.is_set():
                 try:
                     self.status = ControllerStatus.PLANNING
                     planning_start = time.time()
+
                     # Get the latest state data under the lock
                     with self.state_lock:
                         # Create a fresh mjx_data from the latest CPU state
+                        self.mj_data.time = time.time()
                         mjx_data = mjx.put_data(self.task.mj_model, self.mj_data)
 
-                    # Run optimization with the latest state
+                    # Run optimization with the latest state on local policy params
+                    planning_policy_params, rollouts = self.jit_optimize(
+                        mjx_data, planning_policy_params
+                    )
+
+                    # Create a deep copy of the policy parameters for the control loop
+                    # This is crucial to avoid buffer donation issues
+                    active_params_copy = jax.tree_util.tree_map(
+                        lambda x: jnp.array(x, copy=True), planning_policy_params
+                    )
+
+                    # Atomically update the active policy params and rollouts
                     with self.plan_lock:
-                        self.policy_params, rollouts = self.jit_optimize(
-                            mjx_data, self.policy_params
-                        )
+                        self.active_policy_params = active_params_copy
                         self.latest_plan = rollouts
                         self.plan_timestamp = self.mj_data.time
+
                     planning_end = time.time()
-                    # Update status
                     self.status = ControllerStatus.READY
 
+                    # Calculate timing and logging...
                     planning_time = planning_end - planning_start
                     print(f"Planning time: {planning_time:.4f}s")
 
@@ -246,84 +253,18 @@ class HydraxHardwareInterface:
                     print(f"Error during planning: {e}")
                     self.status = ControllerStatus.ERROR
 
-                # Check if we should stop after sleeping
-                if self.should_stop.is_set():
-                    break
+                    # Check if we should stop after sleeping
+                    if self.should_stop.is_set():
+                        break
 
         # Create and start planning thread
         self.planning_thread = threading.Thread(target=planning_worker, daemon=True)
         self.planning_thread.start()
 
-    def _get_action(self, current_time=None):
-        """
-        Get the control action for the current time by interpolating the latest plan.
-
-        Args:
-            current_time: Current time (if None, uses system time)
-
-        Returns:
-            ControlResult: Object containing action and metadata
-        """
-        with self.plan_lock:
-            try:
-                # Use provided time or system time
-                t = current_time if current_time is not None else time.time()
-
-                # If no plan is available yet, return zero action
-                if self.latest_plan is None:
-                    return ControlResult(
-                        action=np.zeros(self.task.model.nu),
-                        timestamp=t,
-                        cost=None,
-                        info={"status": "no_plan"},
-                    )
-
-                # Calculate time since planning
-                relative_time = t - self.plan_timestamp
-
-                # Interpolate action from the plan
-                tq = jnp.array([relative_time])
-                tk = self.policy_params.tk
-                knots = self.policy_params.mean[None, ...]
-                action = self.jit_interp_func(tq, tk, knots)[0][0]
-
-                # Get cost if available - with better error handling
-                try:
-                    if (
-                        self.latest_plan is not None
-                        and hasattr(self.latest_plan, "costs")
-                        and len(self.latest_plan.costs) > 0
-                    ):
-                        cost_val = jnp.sum(self.latest_plan.costs[0])
-                        # Convert from JAX array to Python float
-                        cost = float(cost_val)
-                    else:
-                        cost = None
-                except Exception as e:
-                    print(f"Warning: Error calculating cost: {e}")
-                    cost = None
-
-                return ControlResult(
-                    action=action,
-                    timestamp=t,
-                    cost=cost,
-                    info={"status": "success", "plan_age": relative_time},
-                )
-
-            except Exception as e:
-                print(f"Error getting action: {e}")
-                self.status = ControllerStatus.ERROR
-                return ControlResult(
-                    action=np.zeros(self.task.model.nu),
-                    timestamp=time.time(),
-                    cost=None,
-                    info={"status": "error", "error": str(e)},
-                )
-
     def update_state(self, state_data):
         """
-        Convert hardware state data to internal MuJoCo state.
-        This method must be implemented by subclasses and update state including time.
+        Convert generic hardware state data to internal MuJoCo state.
+        This method must be implemented by subclasses and update state, including time.
 
         Args:
             state_data: Hardware-specific state data
@@ -334,11 +275,18 @@ class HydraxHardwareInterface:
         """Stop all running threads and clean up resources"""
         # Signal threads to stop
         self.should_stop.set()
-        self.planning_event.set()  # Wake up planning thread
 
         # Wait for planning thread to finish
         if self.planning_thread is not None and self.planning_thread.is_alive():
             self.planning_thread.join(timeout=1.0)
+
+        # Wait for viewer thread if it exists
+        if (
+            hasattr(self, "viewer_thread")
+            and self.viewer_thread is not None
+            and self.viewer_thread.is_alive()
+        ):
+            self.viewer_thread.join(timeout=1.0)
 
         print("Controller stopped")
 
@@ -380,32 +328,28 @@ class HydraxHardwareInterface:
                 # Get latest state from hardware (defined by subclass)
                 self.update_state()
 
-                # Get action for current time (defined by subclass)
-                control_result = self._get_action()
+                # Send action to hardware - access the active policy params which
+                # are updated atomically by the planning thread
+                with self.plan_lock:
+                    # Only a brief lock to get a reference to the current parameters
+                    current_params = self.active_policy_params
 
-                # Send action to hardware
-                self.send_command(control_result.action)
+                # Use the parameters without the lock
+                if current_params is not None:
+                    action = np.array(
+                        self.jit_get_action(current_params, time.time()),
+                        dtype=np.float32,
+                    )
+                    self.send_command(action)
+                else:
+                    print("Warning: No policy parameters available yet")
 
                 # Sleep to maintain control frequency
                 elapsed = time.time() - loop_start
                 if elapsed < self.control_dt:
                     time.sleep(self.control_dt - elapsed)
-
-                # Print status periodically
-                if iteration % 10 == 0:  # Print every 10 iterations
-                    rtr = self.control_dt / (
-                        time.time() - loop_start
-                    )  # Real-time ratio
-
-                    # Safer cost formatting
-                    cost_str = "N/A"
-                    if control_result.cost is not None:
-                        try:
-                            cost_str = f"{control_result.cost}"
-                        except (ValueError, TypeError):
-                            cost_str = f"{control_result.cost}"
-
-                    print(f"Iter {iteration}: RTR: {rtr:.2f}, Cost: {cost_str}")
+                else:
+                    print(f"Control loop is behind schedule by {elapsed:.4f}s")
 
                 iteration += 1
 
