@@ -12,15 +12,6 @@ from mujoco import mjx
 import mujoco
 
 
-class ControllerStatus(Enum):
-    """Enum for controller status"""
-
-    IDLE = 0
-    PLANNING = 1
-    READY = 2
-    ERROR = 3
-
-
 class HydraxHardwareInterface:
     """
     Generic middleware for connecting Hydrax controllers with real hardware.
@@ -69,7 +60,6 @@ class HydraxHardwareInterface:
         self.planning_thread = None
         self.planning_event = threading.Event()
         self.should_stop = threading.Event()
-        self.status = ControllerStatus.IDLE
 
         # Action data
         self.latest_plan = None
@@ -167,8 +157,8 @@ class HydraxHardwareInterface:
             # Set active policy params initially
             self.active_policy_params = self.policy_params
 
-            action = self.jit_get_action(self.active_policy_params, 0.0)
-            action = self.jit_get_action(self.active_policy_params, 0.0)
+            _ = self.jit_get_action(self.active_policy_params, 0.0)
+            _ = self.jit_get_action(self.active_policy_params, 0.0)
 
             compile_time = time.time() - start_time
             print(f"JIT compilation complete in {compile_time:.4f}s")
@@ -191,7 +181,6 @@ class HydraxHardwareInterface:
 
             while not self.should_stop.is_set():
                 try:
-                    self.status = ControllerStatus.PLANNING
                     planning_start = time.time()
 
                     # Get the latest state data under the lock
@@ -220,19 +209,11 @@ class HydraxHardwareInterface:
                         self.new_plan_ready.set()
 
                     planning_end = time.time()
-                    self.status = ControllerStatus.READY
 
                     # Calculate timing and logging...
                     planning_time = planning_end - planning_start
                     print(f"Planning time: {planning_time:.4f}s")
-
-                    cost = (
-                        float(jnp.sum(rollouts.costs[0]))
-                        if rollouts is not None
-                        else None
-                    )
-                    if cost is not None:
-                        print(f"Cost: {cost:.4f}")
+                    print(f"Cost: {float(jnp.sum(rollouts.costs[0])):.4f}")
 
                     # Calculate next planning time
                     next_planning_time = max(
@@ -256,7 +237,6 @@ class HydraxHardwareInterface:
 
                 except Exception as e:
                     print(f"Error during planning: {e}")
-                    self.status = ControllerStatus.ERROR
 
                     # Check if we should stop after sleeping
                     if self.should_stop.is_set():
@@ -265,45 +245,6 @@ class HydraxHardwareInterface:
         # Create and start planning thread
         self.planning_thread = threading.Thread(target=planning_worker, daemon=True)
         self.planning_thread.start()
-
-    def update_state(self, state_data):
-        """
-        Convert generic hardware state data to internal MuJoCo state.
-        This method must be implemented by subclasses and update state, including time.
-
-        Args:
-            state_data: Hardware-specific state data
-        """
-        raise NotImplementedError("This method must be implemented by subclasses")
-
-    def stop(self):
-        """Stop all running threads and clean up resources"""
-        # Signal threads to stop
-        self.should_stop.set()
-
-        # Wait for planning thread to finish
-        if self.planning_thread is not None and self.planning_thread.is_alive():
-            self.planning_thread.join(timeout=1.0)
-
-        # Wait for viewer thread if it exists
-        if (
-            hasattr(self, "viewer_thread")
-            and self.viewer_thread is not None
-            and self.viewer_thread.is_alive()
-        ):
-            self.viewer_thread.join(timeout=1.0)
-
-        print("Controller stopped")
-
-    def send_command(self, action):
-        """
-        Send a command to the hardware.
-        This method must be implemented by subclasses.
-
-        Args:
-            action: Control action to send
-        """
-        raise NotImplementedError("This method must be implemented by subclasses")
 
     def run_control_loop(self, hardware_interface, max_iterations=None, duration=None):
         """
@@ -478,3 +419,42 @@ class HydraxHardwareInterface:
         print("Debug viewer started. Close the viewer window to stop.")
 
         return self.viewer_thread
+
+    def update_state(self, state_data):
+        """
+        Convert generic hardware state data to internal MuJoCo state.
+        This method must be implemented by subclasses and update state, including time.
+
+        Args:
+            state_data: Hardware-specific state data
+        """
+        raise NotImplementedError("This method must be implemented by subclasses")
+
+    def stop(self):
+        """Stop all running threads and clean up resources"""
+        # Signal threads to stop
+        self.should_stop.set()
+
+        # Wait for planning thread to finish
+        if self.planning_thread is not None and self.planning_thread.is_alive():
+            self.planning_thread.join(timeout=1.0)
+
+        # Wait for viewer thread if it exists
+        if (
+            hasattr(self, "viewer_thread")
+            and self.viewer_thread is not None
+            and self.viewer_thread.is_alive()
+        ):
+            self.viewer_thread.join(timeout=1.0)
+
+        print("Controller stopped")
+
+    def send_command(self, action):
+        """
+        Send a command to the hardware.
+        This method must be implemented by subclasses.
+
+        Args:
+            action: Control action to send
+        """
+        raise NotImplementedError("This method must be implemented by subclasses")
