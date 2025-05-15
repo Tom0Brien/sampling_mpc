@@ -164,11 +164,11 @@ def main():
     # Configure controller
     controller_config = {
         "num_samples": 128,
-        "plan_horizon": 0.5,
+        "plan_horizon": 0.25,
         "num_knots": 6,
         "sigma_start": 0.1,
         "sigma_min": 0.005,
-        "num_elites": 32,
+        "num_elites": 16,
         "spline_type": "zero",
     }
 

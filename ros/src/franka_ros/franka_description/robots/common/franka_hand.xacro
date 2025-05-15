@@ -12,52 +12,36 @@
 
     <xacro:link_with_sc name="hand" gazebo="${gazebo}">
       <self_collision_geometries>
-        <xacro:collision_capsule xyz="0 0 0.04" direction="y" radius="${0.04+safety_distance}" length="0.1" />
-        <xacro:collision_capsule xyz="0 0 0.10" direction="y" radius="${0.02+safety_distance}" length="0.1" />
+        <!-- Replaced multiple collision volumes with single sphere -->
+        <sphere radius="0.02" xyz="0 0 0.1"/>
       </self_collision_geometries>
     </xacro:link_with_sc>
 
     <!-- Define the hand_tcp frame -->
     <link name="${arm_id}_hand_tcp" />
+
     <joint name="${arm_id}_hand_tcp_joint" type="fixed">
       <origin xyz="${tcp_xyz}" rpy="${tcp_rpy}" />
       <parent link="${arm_id}_hand" />
       <child link="${arm_id}_hand_tcp" />
     </joint>
     <link name="${arm_id}_leftfinger">
+    <visual> 
+        <!-- Added visual sphere to match collision sphere -->
+        <origin xyz="0 0 0.05" rpy="0 0 0"/>
+        <geometry>
+          <sphere radius="0.02"/>
+        </geometry>
+        <material name="transparent_red">
+          <color rgba="1 0 0 0.5"/>
+        </material>
+    </visual> 
       <visual>
         <geometry>
           <mesh filename="package://${description_pkg}/meshes/visual/finger.dae" />
         </geometry>
       </visual>
-      <!-- screw mount -->
-      <collision>
-        <origin xyz="0 18.5e-3 11e-3" rpy="0 0 0" />
-        <geometry>
-          <box size="22e-3 15e-3 20e-3" />
-        </geometry>
-      </collision>
-      <!-- cartriage sledge -->
-      <collision>
-        <origin xyz="0 6.8e-3 2.2e-3" rpy="0 0 0" />
-        <geometry>
-          <box size="22e-3 8.8e-3 3.8e-3" />
-        </geometry>
-      </collision>
-      <!-- diagonal finger -->
-      <collision>
-        <origin xyz="0 15.9e-3 28.35e-3" rpy="${pi/6} 0 0" />
-        <geometry>
-          <box size="17.5e-3 7e-3 23.5e-3" />
-        </geometry>
-      </collision>
-      <!-- rubber tip with which to grasp -->
-      <collision>
-        <origin xyz="0 7.58e-3 45.25e-3" rpy="0 0 0" />
-        <geometry>
-          <box size="17.5e-3 15.2e-3 18.5e-3" />
-        </geometry>
-      </collision>
+      <!-- Removed detailed collisions, using single sphere in hand link -->
       <xacro:if value="${gazebo}">
         <xacro:inertial_props name="leftfinger" />
       </xacro:if>
@@ -69,34 +53,7 @@
           <mesh filename="package://${description_pkg}/meshes/visual/finger.dae" />
         </geometry>
       </visual>
-      <!-- screw mount -->
-      <collision>
-        <origin xyz="0 -18.5e-3 11e-3" rpy="0 0 0" />
-        <geometry>
-          <box size="22e-3 15e-3 20e-3" />
-        </geometry>
-      </collision>
-      <!-- cartriage sledge -->
-      <collision>
-        <origin xyz="0 -6.8e-3 2.2e-3" rpy="0 0 0" />
-        <geometry>
-          <box size="22e-3 8.8e-3 3.8e-3" />
-        </geometry>
-      </collision>
-      <!-- diagonal finger -->
-      <collision>
-        <origin xyz="0 -15.9e-3 28.35e-3" rpy="${-pi/6} 0 0" />
-        <geometry>
-          <box size="17.5e-3 7e-3 23.5e-3" />
-        </geometry>
-      </collision>
-      <!-- rubber tip with which to grasp -->
-      <collision>
-        <origin xyz="0 -7.58e-3 45.25e-3" rpy="0 0 0" />
-        <geometry>
-          <box size="17.5e-3 15.2e-3 18.5e-3" />
-        </geometry>
-      </collision>
+      <!-- Removed detailed collisions, using single sphere in hand link -->
       <xacro:if value="${gazebo}">
         <xacro:inertial_props name="rightfinger" />
       </xacro:if>
@@ -106,7 +63,7 @@
       <child link="${arm_id}_leftfinger" />
       <origin xyz="0 0 0.0584" rpy="0 0 0" />
       <axis xyz="0 1 0" />
-      <limit effort="100" lower="0.0" upper="0.04" velocity="0.2" />
+      <limit effort="100" lower="0.0" upper="1e-6" velocity="0.2" />
       <dynamics damping="0.3" />
     </joint>
     <joint name="${arm_id}_finger_joint2" type="prismatic">
@@ -114,7 +71,7 @@
       <child link="${arm_id}_rightfinger" />
       <origin xyz="0 0 0.0584" rpy="0 0 0" />
       <axis xyz="0 -1 0" />
-      <limit effort="100" lower="0.0" upper="0.04" velocity="0.2" />
+      <limit effort="100" lower="0.0" upper="1e-6" velocity="0.2" />
       <mimic joint="${arm_id}_finger_joint1" />
       <dynamics damping="0.3" />
     </joint>

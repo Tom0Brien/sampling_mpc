@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import sys
 import os
+import threading
+from pynput import keyboard
 
 # Add parent directory to Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -94,12 +96,12 @@ def main():
 
     # Configure controller
     controller_config = {
-        "num_samples": 1024,
-        "plan_horizon": 0.5,
+        "num_samples": 128,
+        "plan_horizon": 0.25,
         "num_knots": 6,
         "sigma_start": 0.1,
         "sigma_min": 0.005,
-        "num_elites": 32,
+        "num_elites": 16,
         "spline_type": "zero",
     }
 
@@ -166,8 +168,6 @@ def start_keyboard_control(controller, step_size=0.05):
     Returns:
         Thread object for the keyboard control thread
     """
-    import threading
-    from pynput import keyboard
 
     def keyboard_control_thread():
         # Flag to indicate if the thread should terminate
