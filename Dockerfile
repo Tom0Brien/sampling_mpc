@@ -31,13 +31,35 @@ RUN apt-get update && apt-get install -y \
     ros-noetic-boost-sml
 
 # Add Gazebo-related packages
-RUN apt-get update && apt-get install -y \
+RUN apt-get install -y \
     ros-noetic-gazebo-ros-pkgs \
     ros-noetic-gazebo-ros-control \
     ros-noetic-joint-state-controller \
     ros-noetic-effort-controllers \
-    ros-noetic-position-controllers
+    ros-noetic-position-controllers \
+    ros-noetic-joint-trajectory-controller \
+    ros-noetic-moveit \
+    ros-noetic-moveit-ros-move-group \
+    ros-noetic-moveit-fake-controller-manager \
+    ros-noetic-moveit-kinematics \
+    ros-noetic-moveit-planners-ompl \
+    ros-noetic-moveit-ros-visualization
 
+# Install Kinova-specific dependencies
+RUN apt-get install -y \
+    ros-noetic-rqt-gui \
+    ros-noetic-rqt-gui-py \
+    libusb-1.0-0-dev
+
+# Install and configure Conan for Kortex API
+RUN pip3 install conan==1.59
+RUN conan config set general.revisions_enabled=1
+RUN conan profile new default --detect > /dev/null
+RUN conan profile update settings.compiler.libcxx=libstdc++11 default
+# Fix for Conan SSL certificate issue
+RUN conan config install https://github.com/conan-io/conanclientcert.git
+
+# Franka-specific build
 RUN git clone --recursive https://github.com/frankaemika/libfranka --branch 0.10.0 # only for FR3
 WORKDIR /libfranka
 RUN mkdir build

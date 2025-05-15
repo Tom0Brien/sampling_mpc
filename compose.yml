@@ -7,27 +7,33 @@ volumes:
 
 services:
   build_ws:
+    image: ros_workspace:latest
     build: .
+    pull_policy: never
     volumes:
       - ./ros:/catkin_ws/src/ros
       - ./ros/src/franka_ros:/catkin_ws/src/franka_ros
+      - ./ros/src/ros_kortex:/catkin_ws/src/ros_kortex
       - ./build_workspace.sh:/build_workspace.sh
       - catkin_ws_build:/catkin_ws/build
       - catkin_ws_build:/catkin_ws/devel
     command: >
       bash -c "
+        set -x &&
         chmod +x /build_workspace.sh &&
         /build_workspace.sh
       "
 
   roscore:
-    build: .
+    image: ros_workspace:latest
+    pull_policy: never
     network_mode: host
     privileged: true
     stdin_open: true
     tty: true
     volumes:
       - ./ros/src/franka_ros:/catkin_ws/src/franka_ros
+      - ./ros/src/ros_kortex:/catkin_ws/src/ros_kortex
       - catkin_ws_build:/catkin_ws/build
       - catkin_ws_build:/catkin_ws/devel
     depends_on:
@@ -36,13 +42,15 @@ services:
     command: roscore
 
   rosbridge:
-    build: .
+    image: ros_workspace:latest
+    pull_policy: never
     network_mode: host
     privileged: true
     stdin_open: true
     tty: true
     volumes:
       - ./ros/src/franka_ros:/catkin_ws/src/franka_ros
+      - ./ros/src/ros_kortex:/catkin_ws/src/ros_kortex
       - catkin_ws_build:/catkin_ws/build
       - catkin_ws_build:/catkin_ws/devel
     depends_on:
@@ -52,8 +60,36 @@ services:
         condition: service_started
     command: /bin/bash -c '. /catkin_ws/devel/setup.bash && roslaunch --wait rosbridge_server rosbridge_websocket.launch'
 
+  kinova_gazebo:
+    image: ros_workspace:latest
+    pull_policy: never
+    environment:
+      - DISPLAY=${DISPLAY}
+      - GAZEBO_MODEL_PATH=/catkin_ws/src/ros_kortex/kortex_description/robots:/catkin_ws/src/ros_kortex/kortex_description/grippers
+      - LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - ./ros/src/ros_kortex:/catkin_ws/src/ros_kortex
+      - catkin_ws_build:/catkin_ws/build
+      - catkin_ws_build:/catkin_ws/devel
+      - .:/app
+      - /app/.venv
+    network_mode: host
+    privileged: true
+    stdin_open: true
+    tty: true
+    depends_on:
+      build_ws:
+        condition: service_completed_successfully
+      roscore:
+        condition: service_started
+      rosbridge:
+        condition: service_started
+    command: /bin/bash -c '. /catkin_ws/devel/setup.bash && roslaunch --wait kortex_gazebo kinova_custom.launch robot_name:=my_gen3 arm:=gen3'
+
   cartesian_impedance_control:
-    build: .
+    image: ros_workspace:latest
+    pull_policy: never
     environment:
       - DISPLAY=${DISPLAY}
       - GAZEBO_MODEL_PATH=/catkin_ws/src/franka_ros/franka_description/robots
@@ -62,6 +98,7 @@ services:
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix
       - ./ros/src/franka_ros:/catkin_ws/src/franka_ros
+      - ./ros/src/ros_kortex:/catkin_ws/src/ros_kortex
       - catkin_ws_build:/catkin_ws/build
       - catkin_ws_build:/catkin_ws/devel
       - .:/app
@@ -78,13 +115,15 @@ services:
     command: /bin/bash -c '. /catkin_ws/devel/setup.bash && roslaunch --wait franka_example_controllers cartesian_impedance_example_controller_no_marker.launch robot:=panda load_gripper:=True robot_ip:=${FCI_IP}'
 
   main:
-    build: .
+    image: ros_workspace:latest
+    pull_policy: never
     environment:
       - DISPLAY=${DISPLAY}
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix
       - ./ros:/catkin_ws/src/ros
       - ./ros/src/franka_ros:/catkin_ws/src/franka_ros
+      - ./ros/src/ros_kortex:/catkin_ws/src/ros_kortex
       - ./build_workspace.sh:/build_workspace.sh
       - catkin_ws_build:/catkin_ws/build
       - catkin_ws_build:/catkin_ws/devel
