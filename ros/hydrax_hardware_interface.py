@@ -242,7 +242,7 @@ class HydraxHardwareInterface:
         self.planning_thread = threading.Thread(target=planning_worker, daemon=True)
         self.planning_thread.start()
 
-    def run_control_loop(self, hardware_interface, max_iterations=None, duration=None):
+    def run_control_loop(self, hardware_interface, max_iterations=None):
         """Run the main control loop that updates state, plans, and acts."""
         start_time = time.time()
         iteration = 0
@@ -256,9 +256,7 @@ class HydraxHardwareInterface:
                 loop_start = time.time()
 
                 # Check termination conditions
-                if (max_iterations and iteration >= max_iterations) or (
-                    duration and (time.time() - start_time) > duration
-                ):
+                if max_iterations and iteration >= max_iterations:
                     break
 
                 # Update state and check for new plan
@@ -324,70 +322,11 @@ class HydraxHardwareInterface:
                     viewer.cam.fixedcamid = fixed_camera_id
                     viewer.cam.type = 2
 
-                # Set up rollout traces if requested
-                trace_geoms = []
-                if show_traces and hasattr(self.task, "trace_site_ids"):
-                    num_trace_sites = len(self.task.trace_site_ids)
-                    ctrl_steps = (
-                        self.controller.ctrl_steps
-                        if hasattr(self.controller, "ctrl_steps")
-                        else 10
-                    )
-
-                    for i in range(num_trace_sites * max_traces * ctrl_steps):
-                        mujoco.mjv_initGeom(
-                            viewer.user_scn.geoms[i],
-                            type=mujoco.mjtGeom.mjGEOM_LINE,
-                            size=np.zeros(3),
-                            pos=np.zeros(3),
-                            mat=np.eye(3).flatten(),
-                            rgba=np.array(trace_color),
-                        )
-                        viewer.user_scn.ngeom += 1
-                        trace_geoms.append(viewer.user_scn.geoms[i])
-
                 # Main viewer loop
                 while viewer.is_running() and not self.should_stop.is_set():
                     # Synchronize the viewer with the latest state
                     with self.state_lock:
                         viewer.sync()
-
-                    # Update trace visualization if we have rollouts and should show traces
-                    # if (
-                    #     show_traces
-                    #     and self.latest_plan is not None
-                    #     and hasattr(self.task, "trace_site_ids")
-                    # ):
-                    #     with self.plan_lock:
-                    #         if hasattr(self.latest_plan, "trace_sites"):
-                    #             ii = 0
-                    #             for k in range(num_trace_sites):
-                    #                 for i in range(
-                    #                     min(
-                    #                         max_traces,
-                    #                         self.latest_plan.trace_sites.shape[0],
-                    #                     )
-                    #                 ):
-                    #                     for j in range(
-                    #                         self.latest_plan.trace_sites.shape[1] - 1
-                    #                     ):
-                    #                         if ii < len(trace_geoms):
-                    #                             mujoco.mjv_connector(
-                    #                                 trace_geoms[ii],
-                    #                                 mujoco.mjtGeom.mjGEOM_LINE,
-                    #                                 trace_width,
-                    #                                 np.array(
-                    #                                     self.latest_plan.trace_sites[
-                    #                                         i, j, k
-                    #                                     ]
-                    #                                 ),
-                    #                                 np.array(
-                    #                                     self.latest_plan.trace_sites[
-                    #                                         i, j + 1, k
-                    #                                     ]
-                    #                                 ),
-                    #                             )
-                    #                             ii += 1
 
                     # Pause to avoid hogging CPU
                     time.sleep(1.0 / 60.0)  # Approx. 60 FPS
@@ -431,9 +370,5 @@ class HydraxHardwareInterface:
     def send_command(self, action):
         """
         Send a command to the hardware.
-        This method must be implemented by subclasses.
-
-        Args:
-            action: Control action to send
         """
         raise NotImplementedError("This method must be implemented by subclasses")
