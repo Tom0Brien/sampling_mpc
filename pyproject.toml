@@ -5,7 +5,6 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12.4"
 dependencies = [
-    "evosax",
     "jax[cuda12]>=0.5.2",
     "matplotlib>=3.10.1",
     "mujoco>=3.3.0",
@@ -22,10 +21,10 @@ dependencies = [
     "interpax>=0.3.7",
     "pytest>=8.3.5",
     "pynput>=1.8.1",
+    "evosax==0.2.0",
 ]
 
 [tool.uv.sources]
-evosax = { git = "https://github.com/RobertTLange/evosax", rev = "04f9ad4680900a7a56becb39dcccf1ead3389669" }
 hydrax = { path = "./hydrax-core" }
 
 [dependency-groups]
